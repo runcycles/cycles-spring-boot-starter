@@ -69,7 +69,7 @@ public class ResearchAgent {
 ---
 ## ⚠️ Enforcement Model (Important)
 Cycles enforces execution limits only on guarded code paths
-(via @Cycles and Spring AOP interception).
+(via `@Cycles` and Spring AOP interception).
 
 * Guarded execution → budgets enforced deterministically
 * Unguarded execution → allowed, but not invisible (surfaced in the dashboard)
@@ -138,7 +138,7 @@ Cycles sits between your code and the execution. It uses a **Check-Then-Act** in
 
 * **v0.1:** Local Redis implementation & Spring AOP. (Beta)
 * **v0.5:** Dashboard for real-time monitoring.
-* **v1.0:** `X-Cycles-Budget` Cycles Context HTTP header for cross-service propagation (experimental).
+* **v1.0:** `X-Cycles-Budget` Cycles Context HTTP header for cross-service propagation.
 
 ---
 
