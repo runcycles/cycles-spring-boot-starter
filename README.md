@@ -2,7 +2,7 @@
 
 **Stop your autonomous agents from bankrupting you.**
 
-Cycles is a JVM-level governance layer for Spring Boot applications. It enforces **hard economic limits** on AI execution, preventing infinite loops, runaway recursion, and API bill shock *before* they happen.
+Cycles is a JVM-level governance layer for Spring Boot applications. It enforces **deterministic economic limits** on guraded AI execution, preventing infinite loops, runaway recursion, and API bill shock *before* they happen.
 
 Rate limits control speed. **Cycles controls spend.**
 
@@ -43,7 +43,7 @@ public class ResearchAgent {
 
     private final OpenAiClient ai;
 
-    // 🛑 HARD STOP: If this method (and its sub-calls) burns > 50 Cycles ($0.50),
+    // 🛑 HARD STOP: If this method (and its sub-calls) burns > 50 Cycles (high-risk budget),
     // execution halts deterministically with a non-recoverable exception.
     @Cycles(limit = 50, action = ExhaustionAction.HALT)
     public Report generateMarketReport(String ticker) {
@@ -67,6 +67,17 @@ public class ResearchAgent {
 * **Audit-Ready:** Every burned Cycle is logged with a cryptographic signature (Enterprise Plan).
 
 ---
+## ⚠️ Enforcement Model (Important)
+Cycles enforces execution limits only on guarded code paths
+(via @Cycles and Spring AOP interception).
+
+* Guarded execution → budgets enforced deterministically
+* Unguarded execution → allowed, but not invisible (surfaced in the dashboard)
+
+This allows teams to:
+* start with visibility
+* progressively harden enforcement
+* avoid breaking existing systems
 
 ## 📦 Installation
 
@@ -115,7 +126,7 @@ cycles:
 Cycles sits between your code and the execution. It uses a **Check-Then-Act** interceptor pattern.
 
 1. **Intercept:** `@Cycles` pauses the request.
-2. **Verify:** Checks the `cycles:wallet:{agent_id}` in Redis.
+2. **Verify:** Checks the `cycles:ledger:{agent_id}` in Redis.
 3. **Burn:** Atomically decrements the cost (e.g., `-5`).
 4. **Verdict:**
 * ✅ **Solvent:** Proceed.
