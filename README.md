@@ -26,7 +26,10 @@ You have a standard Rate Limiter (`100 req/min`).
 ## ⚡ The Solution: "Digital Thermodynamics"
 
 Cycles introduces a new primitive: **The Cycle**.
-1 Cycle = 1 Unit of Risk (e.g., $0.01 USD or 1 Token).
+1 Cycle = 1 Unit of Risk.
+
+A Cycle is a normalized unit of execution risk.
+You decide what actions cost more based on blast radius.
 
 Instead of limiting *requests per second*, you limit *total risk budget*. When the budget hits 0, the execution **halts deterministically**.
 
@@ -41,7 +44,7 @@ public class ResearchAgent {
     private final OpenAiClient ai;
 
     // 🛑 HARD STOP: If this method (and its sub-calls) burns > 50 Cycles ($0.50),
-    // the thread is killed instantly.
+    // execution halts deterministically with a non-recoverable exception.
     @Cycles(limit = 50, action = ExhaustionAction.HALT)
     public Report generateMarketReport(String ticker) {
         
@@ -78,7 +81,7 @@ Add the starter to your `pom.xml`:
 
 ```
 
-Configure your wallet (runs on local Redis by default):
+Configure the Cycles ledger (runs on local Redis by default):
 
 ```yaml
 cycles:
@@ -124,7 +127,7 @@ Cycles sits between your code and the execution. It uses a **Check-Then-Act** in
 
 * **v0.1:** Local Redis implementation & Spring AOP. (Beta)
 * **v0.5:** Dashboard for real-time monitoring.
-* **v1.0:** `X-Cycles-Budget` HTTP Header standard for cross-service governance.
+* **v1.0:** `X-Cycles-Budget` Cycles Context HTTP header for cross-service propagation (experimental).
 
 ---
 
