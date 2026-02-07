@@ -2,7 +2,7 @@
 
 **Stop your autonomous agents from bankrupting you.**
 
-Cycles is a JVM-level governance layer for Spring Boot applications. It enforces **deterministic economic limits** on guraded AI execution, preventing infinite loops, runaway recursion, and API bill shock *before* they happen.
+Cycles is a JVM-level governance layer for Spring Boot applications. It enforces **deterministic economic limits** on guarded AI execution, preventing infinite loops, runaway recursion, and API bill shock *before* they happen.
 
 Rate limits control speed. **Cycles controls spend.**
 
