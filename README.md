@@ -225,7 +225,7 @@ Cycles exposes a Spring Boot Actuator endpoint to hot-patch budgets live.
 
 ```bash
 # Emergency: Boost budget by 500 cycles for an active agent
-curl -X POST http://localhost:8080/actuator/cycles/wallet/agent-007/topup \
+curl -X POST http://localhost:8080/actuator/cycles/ledger/agent-007/topup \
      -d '{"amount": 500}'
 
 ```
