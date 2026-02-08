@@ -130,7 +130,7 @@ Cycles sits between your code and the execution. It uses a **Check-Then-Act** in
 3. **Burn:** Atomically decrements the cost (e.g., `-5`).
 4. **Verdict:**
 * ✅ **Solvent:** Proceed.
-* ❌ **Insolvent:** Throw `CycleExhaustedException`.
+* ❌ **Insolvent:** Throw `CycleExhaustedException: Execution halted after exceeding risk budget`.
 
 ---
 
