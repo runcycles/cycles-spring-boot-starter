@@ -154,4 +154,3 @@ If you are running Spring AI in production and worry about cost, let's talk.
 ---
 
 **License:** Apache 2.0
-**Maintained by:** [Albert Mavashev / K2N Labs Inc]
