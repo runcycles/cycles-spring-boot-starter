@@ -1,10 +1,10 @@
-# Cycles: The Economic Circuit Breaker for Spring AI
+# Cycles: The Economic Governance Layer for Spring AI
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.cycles/cycles-spring-boot-starter.svg?label=Maven%20Central)](https://search.maven.org/search?q=g:%22io.cycles%22%20AND%20a:%22cycles-spring-boot-starter%22)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Status](https://img.shields.io/badge/Status-Private%20Beta-orange)]()
 
-**The Circuit Breaker for Financial Liability.**
+**The Economic Circuit Breaker for Autonomous Agents**
 
 Cycles is a JVM-level **economic governance layer** for Spring Boot applications.
 It enforces **deterministic spend limits** on guarded AI execution—preventing infinite loops, runaway recursion, and API bill shock *before* they happen.
