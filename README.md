@@ -238,7 +238,7 @@ curl -X POST http://localhost:8080/actuator/cycles/ledger/agent-007/topup \
 | --- | --- | --- |
 | **Metric** | Requests / Second | **Risk / Execution** |
 | **Goal** | Protect the *Server* from overload | Protect the *Wallet* from bankruptcy |
-| **Outcome** | Throttles traffic (Slows down) | **Kills process** (Stops completely) |
+| **Outcome** | Throttles traffic (Slows down) | **Degrade → Restrict → Halt Execution** |
 | **Context** | Single Service | **Distributed Call Graph** (A calls B calls C) |
 | **Use Case** | High Traffic APIs | **Autonomous Agents & LLMs** |
 
