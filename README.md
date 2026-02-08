@@ -1,12 +1,3 @@
-Here is the complete, consolidated **README.md**.
-
-It follows a logical flow: **Hook -> Quick Start -> Basic Usage -> Enterprise Configuration -> Operations -> Theory.**
-
-Copy and paste the code block below directly into your repository.
-
----
-
-```markdown
 # Cycles: The Economic Governance Layer for Spring AI
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.cycles/cycles-spring-boot-starter.svg?label=Maven%20Central)](https://search.maven.org/search?q=g:%22io.cycles%22%20AND%20a:%22cycles-spring-boot-starter%22)
