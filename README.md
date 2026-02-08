@@ -37,7 +37,7 @@ Cycles introduces a new primitive: **The Cycle**.
 
 > **1 Cycle = 1 Unit of Execution Risk** > (e.g., $0.01 USD, 1 Token, or a weighted complexity score)
 
-Instead of limiting *requests per second*, Cycles limits **total risk per execution**.
+Instead of limiting *requests per second*, Cycles limits **total risk per execution** (across the entire call graph).
 
 As the budget tightens, Cycles **degrades behavior according to policy**.  
 When the budget is exhausted, execution **halts deterministically**.
