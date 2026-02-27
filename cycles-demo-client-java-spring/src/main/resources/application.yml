@@ -1,0 +1,12 @@
+server:
+  port: 7955
+spring:
+  application:
+    name: cycles-demo-app
+cycles:
+  api-key: gov_es8SkfWnwpbu8n3rc62nP_J7fiJnKWsP
+  base-url: http://localhost:7878
+  retry:
+    enabled: true
+    max-attempts: 5
+    delay: 2s
