@@ -11,8 +11,8 @@ public class LlmService {
 
     @Cycles(
             tenant = "ecosystem-saulius-1",
-            //workspace = "development",
-            //app = "scalerx",
+            workspace = "development",
+            app = "scalerx",
             estimateExpression = "#p1 * 10",
             actualExpression = "#result.length() * 5",
             useEstimatedIfActualNotProvided = false,
