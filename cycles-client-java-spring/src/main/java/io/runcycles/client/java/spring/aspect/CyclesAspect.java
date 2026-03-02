@@ -1,8 +1,7 @@
 package io.runcycles.client.java.spring.aspect;
 
-import io.runcycles.client.java.spring.annotation.CyclesBudget;
+import io.runcycles.client.java.spring.annotation.Cycles;
 import io.runcycles.client.java.spring.client.CyclesClient;
-import io.runcycles.client.java.spring.context.*;
 import io.runcycles.client.java.spring.evaluation.CyclesExpressionEvaluator;
 import io.runcycles.client.java.spring.retry.CommitRetryEngine;
 
@@ -19,34 +18,34 @@ import java.util.Map;
 import java.util.UUID;
 
 @Aspect
-public class CyclesBudgetAspect {
-    private static final Logger LOG = LoggerFactory.getLogger(CyclesBudgetAspect.class);
+public class CyclesAspect {
+    private static final Logger LOG = LoggerFactory.getLogger(CyclesAspect.class);
 
     private final CyclesClient client;
     private final CommitRetryEngine retryEngine;
     private final CyclesExpressionEvaluator evaluator;
 
-    public CyclesBudgetAspect(CyclesClient client,
-                              CommitRetryEngine retryEngine,
-                              CyclesExpressionEvaluator evaluator) {
+    public CyclesAspect(CyclesClient client,
+                        CommitRetryEngine retryEngine,
+                        CyclesExpressionEvaluator evaluator) {
         this.client = client;
         this.retryEngine = retryEngine;
         this.evaluator = evaluator;
     }
 
-    @Around("@annotation(cyclesBudget)")
-    public Object around(ProceedingJoinPoint pjp, CyclesBudget cyclesBudget) throws Throwable {
-        LOG.info("Cycles budget aspect flow start: cyclesBudget={}",cyclesBudget);
+    @Around("@annotation(cycles)")
+    public Object around(ProceedingJoinPoint pjp, Cycles cycles) throws Throwable {
+        LOG.info("Cycles aspect flow start: cycles={}", cycles);
         long t1 = System.currentTimeMillis() ;
         if (CyclesContextHolder.get() != null) {
             LOG.error("Nested annotation usage not supported");
-            throw new IllegalStateException("Nested @CyclesBudget not supported");
+            throw new IllegalStateException("Nested @Cycles not supported");
         }
 
         Method method = ((MethodSignature) pjp.getSignature()).getMethod();
 
         long estimate = evaluator.evaluate(
-                cyclesBudget.estimateExpression(),
+                cycles.estimateExpression(),
                 method,
                 pjp.getArgs(),
                 null,
@@ -57,19 +56,19 @@ public class CyclesBudgetAspect {
         Map<String, Object> createBody = Map.of(
                 "idempotency_key", UUID.randomUUID().toString(),
                 "subject", Map.of(
-                        "tenant", cyclesBudget.tenant(),
-                        "workspace", cyclesBudget.workspace(),
-                        "app", cyclesBudget.app()
+                        "tenant", cycles.tenant(),
+                        "workspace", cycles.workspace(),
+                        "app", cycles.app()
                 ),
                 "action", Map.of(
-                        "kind", cyclesBudget.actionKind(),
-                        "name", cyclesBudget.actionName()
+                        "kind", cycles.actionKind(),
+                        "name", cycles.actionName()
                 ),
                 "estimate", Map.of(
-                        "unit", cyclesBudget.unit(),
+                        "unit", cycles.unit(),
                         "amount", estimate
                 ),
-                "ttl_ms", cyclesBudget.ttlMs()
+                "ttl_ms", cycles.ttlMs()
         );
         LOG.info("Creating reservation: createBody={}",createBody);
         long resT1 = System.currentTimeMillis();
@@ -82,15 +81,15 @@ public class CyclesBudgetAspect {
             Object result = pjp.proceed();
             LOG.info("Annotated method finished its execution: reservationId={}, result={}",reservationId,result);
             long actual;
-            if (!cyclesBudget.actualExpression().isBlank()) {
+            if (!cycles.actualExpression().isBlank()) {
                 actual = evaluator.evaluate(
-                        cyclesBudget.actualExpression(),
+                        cycles.actualExpression(),
                         method,
                         pjp.getArgs(),
                         result,
                         pjp.getTarget()
                 );
-            } else if (cyclesBudget.useEstimatedIfActualNotProvided()) {
+            } else if (cycles.useEstimatedIfActualNotProvided()) {
                 actual = estimate;
             } else {
                 LOG.error("Actual usage amount is missing that is required");
@@ -100,10 +99,10 @@ public class CyclesBudgetAspect {
             Map<String, Object> commitBody = Map.of(
                     "idempotency_key", UUID.randomUUID().toString(),
                     "actual", Map.of(
-                            "unit", cyclesBudget.unit(),
+                            "unit", cycles.unit(),
                             "amount", actual
                     ),
-                    "overage_policy", cyclesBudget.overagePolicy()
+                    "overage_policy", cycles.overagePolicy()
             );
 
             try {
@@ -117,11 +116,11 @@ public class CyclesBudgetAspect {
                 retryEngine.schedule(reservationId, commitBody);
             }
             long t2 = System.currentTimeMillis() ;
-            LOG.info("Cycles budget aspect flow finished: elapseTime={}ms, cyclesBudget={}",(t2-t1),cyclesBudget);
+            LOG.info("Cycles aspect flow finished: elapseTime={}ms, cycles={}",(t2-t1), cycles);
             return result;
 
         } catch (Throwable ex) {
-            LOG.error("Failed to process Cycles budget aspect: cyclesBudget={}",cyclesBudget,ex);
+            LOG.error("Failed to process Cycles budget aspect: cycles={}", cycles,ex);
             try {
                 LOG.info("Releasing reservation due to processing fault: reservationId={}",reservationId);
                 client.releaseReservation(reservationId,

@@ -1,6 +1,6 @@
 package io.runcycles.client.java.spring.autoconfigure;
 
-import io.runcycles.client.java.spring.aspect.CyclesBudgetAspect;
+import io.runcycles.client.java.spring.aspect.CyclesAspect;
 import io.runcycles.client.java.spring.config.CyclesProperties;
 import io.runcycles.client.java.spring.evaluation.CyclesExpressionEvaluator;
 
@@ -41,9 +41,9 @@ public class CyclesAutoConfiguration {
     }
 
     @Bean
-    public CyclesBudgetAspect aspect(CyclesClient client,
-                                     CommitRetryEngine retryEngine,
-                                     CyclesExpressionEvaluator evaluator) {
-        return new CyclesBudgetAspect(client, retryEngine, evaluator);
+    public CyclesAspect aspect(CyclesClient client,
+                               CommitRetryEngine retryEngine,
+                               CyclesExpressionEvaluator evaluator) {
+        return new CyclesAspect(client, retryEngine, evaluator);
     }
 }

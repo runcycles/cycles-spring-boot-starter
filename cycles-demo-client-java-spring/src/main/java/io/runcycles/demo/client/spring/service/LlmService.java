@@ -1,7 +1,7 @@
 package io.runcycles.demo.client.spring.service;
 
 
-import io.runcycles.client.java.spring.annotation.CyclesBudget;
+import io.runcycles.client.java.spring.annotation.Cycles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 public class LlmService {
     private static final Logger LOG = LoggerFactory.getLogger(LlmService.class);
 
-    @CyclesBudget(
+    @Cycles(
             tenant = "ecosystem-saulius-1",
             workspace = "development",
             app = "scalerx",

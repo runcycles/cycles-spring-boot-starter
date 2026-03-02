@@ -5,7 +5,7 @@ import java.lang.annotation.*;
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-public @interface CyclesBudget {
+public @interface Cycles {
 
     String tenant();
     String workspace() default "";
