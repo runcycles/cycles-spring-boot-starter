@@ -3,6 +3,7 @@ package io.runcycles.client.java.spring.aspect;
 import io.runcycles.client.java.spring.annotation.Cycles;
 import io.runcycles.client.java.spring.client.CyclesClient;
 import io.runcycles.client.java.spring.evaluation.CyclesExpressionEvaluator;
+import io.runcycles.client.java.spring.model.CyclesBusinessException;
 import io.runcycles.client.java.spring.model.CyclesResponse;
 import io.runcycles.client.java.spring.retry.CommitRetryEngine;
 
@@ -61,12 +62,12 @@ public class CyclesAspect {
         CyclesResponse<Map<String,Object>> reservationResponse = client.createReservation(createBody);
         if (!reservationResponse.is2xx()){
             LOG.error("Reservation failed, aborting further processing: reservationResponse={}",reservationResponse);
-            throw new Exception("Failed to proceed reservation: "+reservationResponse.getErrorMessage());
+            throw new CyclesBusinessException("Failed to proceed reservation: "+reservationResponse.getErrorMessage());
         }
         String reservationId = extractReservationId (reservationResponse);
         if (reservationId == null){
             LOG.error("Reservation was successful, but reservation id not found in the response body: reservationResponseBody={}",reservationResponse.getBody());
-            throw new Exception("Failed to proceed reservation because of missing reservation identifier");
+            throw new CyclesBusinessException("Failed to proceed reservation because of missing reservation identifier");
         }
         long resT2 = System.currentTimeMillis();
         LOG.info("Reservation created: elapseTime={}ms, reservationId={}",(resT2-resT1),reservationId);
