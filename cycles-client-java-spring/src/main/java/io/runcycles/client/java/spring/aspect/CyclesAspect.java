@@ -3,6 +3,7 @@ package io.runcycles.client.java.spring.aspect;
 import io.runcycles.client.java.spring.annotation.Cycles;
 import io.runcycles.client.java.spring.client.CyclesClient;
 import io.runcycles.client.java.spring.evaluation.CyclesExpressionEvaluator;
+import io.runcycles.client.java.spring.model.CyclesResponse;
 import io.runcycles.client.java.spring.retry.CommitRetryEngine;
 
 import io.runcycles.client.java.spring.context.CyclesContextHolder;
@@ -53,26 +54,20 @@ public class CyclesAspect {
         );
         LOG.info("Estimated usage: estimate={}",estimate);
 
-        Map<String, Object> createBody = Map.of(
-                "idempotency_key", UUID.randomUUID().toString(),
-                "subject", Map.of(
-                        "tenant", cycles.tenant(),
-                        "workspace", cycles.workspace(),
-                        "app", cycles.app()
-                ),
-                "action", Map.of(
-                        "kind", cycles.actionKind(),
-                        "name", cycles.actionName()
-                ),
-                "estimate", Map.of(
-                        "unit", cycles.unit(),
-                        "amount", estimate
-                ),
-                "ttl_ms", cycles.ttlMs()
-        );
+        Map<String, Object> createBody = buildReservationRequest(cycles,estimate);
+
         LOG.info("Creating reservation: createBody={}",createBody);
         long resT1 = System.currentTimeMillis();
-        String reservationId = client.createReservation(createBody);
+        CyclesResponse<Map<String,Object>> reservationResponse = client.createReservation(createBody);
+        if (!reservationResponse.is2xx()){
+            LOG.error("Reservation failed, aborting further processing: reservationResponse={}",reservationResponse);
+            throw new Exception("Failed to proceed reservation: "+reservationResponse.getErrorMessage());
+        }
+        String reservationId = extractReservationId (reservationResponse);
+        if (reservationId == null){
+            LOG.error("Reservation was successful, but reservation id not found in the response body: reservationResponseBody={}",reservationResponse.getBody());
+            throw new Exception("Failed to proceed reservation because of missing reservation identifier");
+        }
         long resT2 = System.currentTimeMillis();
         LOG.info("Reservation created: elapseTime={}ms, reservationId={}",(resT2-resT1),reservationId);
         CyclesContextHolder.set(new CyclesReservationContext(reservationId, estimate));
@@ -108,9 +103,25 @@ public class CyclesAspect {
             try {
                 LOG.info("Commiting reservation: reservationId={}, commitBody={}",reservationId,commitBody);
                 long comT1 = System.currentTimeMillis();
-                client.commitReservation(reservationId, commitBody);
+                CyclesResponse<Map<String,Object>> commitResponse = client.commitReservation(reservationId, commitBody);
                 long comT2 = System.currentTimeMillis();
-                LOG.info("Commit done: elapseTime={}ms",(comT2-comT1));
+                LOG.info("Commit done: elapseTime={}ms, response={}",(comT2-comT1),commitResponse);
+                if (commitResponse.is2xx()){
+                    LOG.info("Commit was successful: reservationId={}, responseBody={}",reservationId,commitResponse.getBody());
+                }
+                else {
+                    LOG.error("Commit failed: reservationId={}, reason={}, responseBody={}",reservationId,commitResponse.getErrorMessage(),commitResponse.getBody());
+                    //FIXME need to check when should schedule retry and when not
+                    if (commitResponse.isTransportError() || commitResponse.is5xx()){
+                        retryEngine.schedule(reservationId, commitBody);
+                    } else if (commitResponse.is4xx()) {
+                        handleReleaseReservation(reservationId);
+                    }
+                    else {
+                        LOG.warn("Unrecognized response so nothing to do: response={}",commitResponse);
+                    }
+                }
+
             } catch (Exception e) {
                 LOG.error("Failed to commit reservation: reservationId={}",reservationId,e);
                 retryEngine.schedule(reservationId, commitBody);
@@ -121,14 +132,47 @@ public class CyclesAspect {
 
         } catch (Throwable ex) {
             LOG.error("Failed to process Cycles budget aspect: cycles={}", cycles,ex);
-            try {
-                LOG.info("Releasing reservation due to processing fault: reservationId={}",reservationId);
-                client.releaseReservation(reservationId,
-                        Map.of("idempotency_key", UUID.randomUUID().toString()));
-            } catch (Exception ignored) {LOG.error("Failed to release reservation on main failure: reservationId={}",reservationId,ignored);}
+            handleReleaseReservation(reservationId);
             throw ex;
         } finally {
             CyclesContextHolder.clear();
         }
+    }
+    private Map<String,Object>buildReservationRequest (Cycles cycles, long estimatedAmount){
+        Map<String, Object> createBody = Map.of(
+                "idempotency_key", UUID.randomUUID().toString(),
+                "subject", Map.of(
+                        "tenant", cycles.tenant(),
+                        "workspace", cycles.workspace(),
+                        "app", cycles.app()
+                ),
+                "action", Map.of(
+                        "kind", cycles.actionKind(),
+                        "name", cycles.actionName()
+                ),
+                "estimate", Map.of(
+                        "unit", cycles.unit(),
+                        "amount", estimatedAmount
+                ),
+                "ttl_ms", cycles.ttlMs()
+        );
+        return createBody;
+    }
+    private String extractReservationId (CyclesResponse<Map<String,Object>> response){
+        return response.getBodyAttributeAsString("reservation_id") ;
+    }
+    private void handleReleaseReservation (String reservationId){
+        try {
+            LOG.info("Releasing reservation due to processing fault: reservationId={}",reservationId);
+            CyclesResponse<Map<String,Object>> releaseResponse = client.releaseReservation(reservationId,
+                    Map.of("idempotency_key", UUID.randomUUID().toString()));
+            LOG.info("Reservation released: reservationId={}, releaseResponse={}",reservationId,releaseResponse);
+            if (releaseResponse.is2xx()){
+                LOG.info("Reservation released successfully: reservationId={}, responseBody={}",reservationId,releaseResponse.getBody());
+            }
+            else {
+                LOG.info("Reservation released failed or is unknown: reservationId={}, errorMessage={}, responseBody={}",reservationId,releaseResponse.getErrorMessage(),releaseResponse.getBody());
+            }
+        } catch (Exception ignored) {LOG.error("Failed to release reservation on main failure: reservationId={}",reservationId,ignored);}
     }
 }

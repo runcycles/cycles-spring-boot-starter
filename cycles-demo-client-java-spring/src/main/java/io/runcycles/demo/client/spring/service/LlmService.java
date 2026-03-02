@@ -1,6 +1,5 @@
 package io.runcycles.demo.client.spring.service;
 
-
 import io.runcycles.client.java.spring.annotation.Cycles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
