@@ -2,6 +2,8 @@ package io.runcycles.client.java.spring.aspect;
 
 import io.runcycles.client.java.spring.annotation.Cycles;
 import io.runcycles.client.java.spring.client.CyclesClient;
+import io.runcycles.client.java.spring.config.CyclesProperties;
+import io.runcycles.client.java.spring.context.CyclesRequestBuilder;
 import io.runcycles.client.java.spring.evaluation.CyclesExpressionEvaluator;
 import io.runcycles.client.java.spring.model.CyclesProtocolException;
 import io.runcycles.client.java.spring.model.CyclesResponse;
@@ -23,16 +25,19 @@ import java.util.UUID;
 public class CyclesAspect {
     private static final Logger LOG = LoggerFactory.getLogger(CyclesAspect.class);
 
+
     private final CyclesClient client;
     private final CommitRetryEngine retryEngine;
     private final CyclesExpressionEvaluator evaluator;
+    private final CyclesProperties cyclesConfiguration;
 
     public CyclesAspect(CyclesClient client,
                         CommitRetryEngine retryEngine,
-                        CyclesExpressionEvaluator evaluator) {
+                        CyclesExpressionEvaluator evaluator, CyclesProperties cyclesConfiguration) {
         this.client = client;
         this.retryEngine = retryEngine;
         this.evaluator = evaluator;
+        this.cyclesConfiguration = cyclesConfiguration;
     }
 
     @Around("@annotation(cycles)")
@@ -92,14 +97,7 @@ public class CyclesAspect {
                 throw new IllegalStateException("Actual expression required");
             }
 
-            Map<String, Object> commitBody = Map.of(
-                    "idempotency_key", UUID.randomUUID().toString(),
-                    "actual", Map.of(
-                            "unit", cycles.unit(),
-                            "amount", actual
-                    ),
-                    "overage_policy", cycles.overagePolicy()
-            );
+            Map<String,Object>commitBody = CyclesRequestBuilder.buildCommit(cycles,actual);
 
             try {
                 LOG.info("Commiting reservation: reservationId={}, commitBody={}",reservationId,commitBody);
@@ -140,24 +138,7 @@ public class CyclesAspect {
         }
     }
     private Map<String,Object>buildReservationRequest (Cycles cycles, long estimatedAmount){
-        Map<String, Object> createBody = Map.of(
-                "idempotency_key", UUID.randomUUID().toString(),
-                "subject", Map.of(
-                        "tenant", cycles.tenant(),
-                        "workspace", cycles.workspace(),
-                        "app", cycles.app()
-                ),
-                "action", Map.of(
-                        "kind", cycles.actionKind(),
-                        "name", cycles.actionName()
-                ),
-                "estimate", Map.of(
-                        "unit", cycles.unit(),
-                        "amount", estimatedAmount
-                ),
-                "ttl_ms", cycles.ttlMs()
-        );
-        return createBody;
+        return CyclesRequestBuilder.buildReservation(cyclesConfiguration,cycles,estimatedAmount);
     }
     private String extractReservationId (CyclesResponse<Map<String,Object>> response){
         return response.getBodyAttributeAsString("reservation_id") ;
@@ -166,7 +147,7 @@ public class CyclesAspect {
         try {
             LOG.info("Releasing reservation due to processing fault: reservationId={}",reservationId);
             CyclesResponse<Map<String,Object>> releaseResponse = client.releaseReservation(reservationId,
-                    Map.of("idempotency_key", UUID.randomUUID().toString()));
+                    CyclesRequestBuilder.buildRelease());
             LOG.info("Reservation released: reservationId={}, releaseResponse={}",reservationId,releaseResponse);
             if (releaseResponse.is2xx()){
                 LOG.info("Reservation released successfully: reservationId={}, responseBody={}",reservationId,releaseResponse.getBody());

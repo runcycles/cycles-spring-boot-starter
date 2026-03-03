@@ -43,7 +43,8 @@ public class CyclesAutoConfiguration {
     @Bean
     public CyclesAspect aspect(CyclesClient client,
                                CommitRetryEngine retryEngine,
-                               CyclesExpressionEvaluator evaluator) {
-        return new CyclesAspect(client, retryEngine, evaluator);
+                               CyclesExpressionEvaluator evaluator,
+                               CyclesProperties props) {
+        return new CyclesAspect(client, retryEngine, evaluator,props);
     }
 }

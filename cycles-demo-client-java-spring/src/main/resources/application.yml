@@ -6,6 +6,9 @@ spring:
 cycles:
   api-key: gov_es8SkfWnwpbu8n3rc62nP_J7fiJnKWsP
   base-url: http://localhost:7878
+  tenant: ecosystem-saulius-1
+  workspace: development
+  app: scalerx
   retry:
     enabled: true
     max-attempts: 5

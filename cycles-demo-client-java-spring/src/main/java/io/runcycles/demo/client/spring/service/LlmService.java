@@ -10,17 +10,18 @@ public class LlmService {
     private static final Logger LOG = LoggerFactory.getLogger(LlmService.class);
 
     @Cycles(
-            tenant = "ecosystem-saulius-1",
-            workspace = "development",
-            app = "scalerx",
+            //tenant = "ecosystem-saulius-1",
+            //workspace = "development",
+            //app = "scalerx",
+            //workflow = "", agent = "", toolset = "",
             estimateExpression = "#p1 * 10",
             actualExpression = "#result.length() * 5",
-            useEstimatedIfActualNotProvided = false,
+            //useEstimatedIfActualNotProvided = false,
             actionKind = "llm.completion",
-            actionName = "gpt-4",
-            overagePolicy = "ALLOW_WITH_OVERDRAFT",
-            unit = "USD_MICROCENTS"
-    )
+            actionName = "gpt-4"
+            //overagePolicy = "ALLOW_WITH_OVERDRAFT",
+            //unit = "USD_MICROCENTS"
+            )
     public String generateText(String prompt, int tokens) {
         LOG.info("Calling LLM for text generation: prompt={}, tokens={}",prompt,tokens) ;
 

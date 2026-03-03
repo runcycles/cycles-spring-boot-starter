@@ -7,9 +7,12 @@ import java.lang.annotation.*;
 @Documented
 public @interface Cycles {
 
-    String tenant();
+    String tenant() default "";
     String workspace() default "";
     String app() default "";
+    String workflow() default "";
+    String agent () default "";
+    String toolset () default "";
 
     String actionKind();
     String actionName();
@@ -22,4 +25,5 @@ public @interface Cycles {
     String unit() default "USD_MICROCENTS";
     long ttlMs() default 3600000;
     String overagePolicy() default "ALLOW_WITH_OVERDRAFT";
+
 }
