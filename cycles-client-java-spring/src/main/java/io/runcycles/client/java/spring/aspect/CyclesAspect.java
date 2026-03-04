@@ -3,7 +3,7 @@ package io.runcycles.client.java.spring.aspect;
 import io.runcycles.client.java.spring.annotation.Cycles;
 import io.runcycles.client.java.spring.client.CyclesClient;
 import io.runcycles.client.java.spring.config.CyclesProperties;
-import io.runcycles.client.java.spring.context.CyclesRequestBuilder;
+import io.runcycles.client.java.spring.context.CyclesRequestBuilderService;
 import io.runcycles.client.java.spring.evaluation.CyclesExpressionEvaluator;
 import io.runcycles.client.java.spring.model.CyclesProtocolException;
 import io.runcycles.client.java.spring.model.CyclesResponse;
@@ -19,7 +19,6 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
 import java.util.Map;
-import java.util.UUID;
 
 @Aspect
 public class CyclesAspect {
@@ -29,13 +28,17 @@ public class CyclesAspect {
     private final CyclesClient client;
     private final CommitRetryEngine retryEngine;
     private final CyclesExpressionEvaluator evaluator;
+    private final CyclesRequestBuilderService cyclesRequestBuilderService;
     private final CyclesProperties cyclesConfiguration;
 
     public CyclesAspect(CyclesClient client,
                         CommitRetryEngine retryEngine,
-                        CyclesExpressionEvaluator evaluator, CyclesProperties cyclesConfiguration) {
+                        CyclesRequestBuilderService cyclesRequestBuilderService,
+                        CyclesExpressionEvaluator evaluator,
+                        CyclesProperties cyclesConfiguration) {
         this.client = client;
         this.retryEngine = retryEngine;
+        this.cyclesRequestBuilderService = cyclesRequestBuilderService;
         this.evaluator = evaluator;
         this.cyclesConfiguration = cyclesConfiguration;
     }
@@ -97,7 +100,7 @@ public class CyclesAspect {
                 throw new IllegalStateException("Actual expression required");
             }
 
-            Map<String,Object>commitBody = CyclesRequestBuilder.buildCommit(cycles,actual);
+            Map<String,Object>commitBody = cyclesRequestBuilderService.buildCommit(cycles,actual);
 
             try {
                 LOG.info("Commiting reservation: reservationId={}, commitBody={}",reservationId,commitBody);
@@ -138,7 +141,7 @@ public class CyclesAspect {
         }
     }
     private Map<String,Object>buildReservationRequest (Cycles cycles, long estimatedAmount){
-        return CyclesRequestBuilder.buildReservation(cyclesConfiguration,cycles,estimatedAmount);
+        return cyclesRequestBuilderService.buildReservation(cycles,estimatedAmount);
     }
     private String extractReservationId (CyclesResponse<Map<String,Object>> response){
         return response.getBodyAttributeAsString("reservation_id") ;
@@ -147,7 +150,7 @@ public class CyclesAspect {
         try {
             LOG.info("Releasing reservation due to processing fault: reservationId={}",reservationId);
             CyclesResponse<Map<String,Object>> releaseResponse = client.releaseReservation(reservationId,
-                    CyclesRequestBuilder.buildRelease());
+                    cyclesRequestBuilderService.buildRelease());
             LOG.info("Reservation released: reservationId={}, releaseResponse={}",reservationId,releaseResponse);
             if (releaseResponse.is2xx()){
                 LOG.info("Reservation released successfully: reservationId={}, responseBody={}",reservationId,releaseResponse.getBody());

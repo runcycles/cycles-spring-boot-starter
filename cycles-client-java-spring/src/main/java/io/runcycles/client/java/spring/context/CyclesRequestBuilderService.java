@@ -1,24 +1,30 @@
 package io.runcycles.client.java.spring.context;
 
 import io.runcycles.client.java.spring.annotation.Cycles;
-import io.runcycles.client.java.spring.config.CyclesProperties;
+import io.runcycles.client.java.spring.evaluation.CyclesValueResolutionService;
 import io.runcycles.client.java.spring.model.CyclesProtocolException;
 import io.runcycles.client.java.spring.util.Constants;
-import org.springframework.lang.NonNull;
+import io.runcycles.client.java.spring.util.ValidationUtils;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
-public class CyclesRequestBuilder {
+public class CyclesRequestBuilderService {
 
-    public static Map<String, Object> buildReservation(@NonNull CyclesProperties cfg, Cycles cycles, long estimatedAmount) {
+    private final CyclesValueResolutionService cyclesValueResolutionService;
+
+    public CyclesRequestBuilderService (CyclesValueResolutionService cyclesValueResolutionService){
+        this.cyclesValueResolutionService = cyclesValueResolutionService;
+    }
+
+    public Map<String, Object> buildReservation(Cycles cycles, long estimatedAmount) {
         Objects.requireNonNull(cycles, "Cycles annotation must not be null");
 
-        validateReservationMandatory(cfg, cycles, estimatedAmount);
+        validateReservationMandatory(cycles, estimatedAmount);
 
-        Map<String, Object> subject = buildSubject(cfg,cycles);
+        Map<String, Object> subject = buildSubject(cycles);
         Map<String, Object> action = buildAction(cycles);
         Map<String, Object> estimate = buildEstimate(cycles, estimatedAmount);
 
@@ -35,11 +41,11 @@ public class CyclesRequestBuilder {
 
         return body;
     }
-    public static Map<String, Object> buildRelease() {
+    public Map<String, Object> buildRelease() {
         return Map.of(Constants.IDEMPOTENCY_KEY, UUID.randomUUID().toString()) ;
     }
 
-    public static Map<String, Object> buildCommit(Cycles cycles, long actualAmount) {
+    public Map<String, Object> buildCommit(Cycles cycles, long actualAmount) {
         Objects.requireNonNull(cycles, "Cycles annotation must not be null");
 
         Map<String, Object> body = new HashMap<>();
@@ -48,22 +54,22 @@ public class CyclesRequestBuilder {
         Map<String, Object> actual = buildActual(cycles, actualAmount);
         body.put("actual", actual);
 
-        putIfNotBlank(body, "overage_policy", cycles.overagePolicy());
+        ValidationUtils.putIfNotBlank(body, "overage_policy", cycles.overagePolicy());
         return body;
     }
 
     // -------------------------
     // Subject
     // -------------------------
-    private static Map<String, Object> buildSubject(CyclesProperties cfg, Cycles c) {
+    private Map<String, Object> buildSubject(Cycles c) {
         Map<String, Object> subject = new HashMap<>();
 
-        putIfNotBlank(subject, "tenant", resolve(c.tenant(), cfg.getTenant()));
-        putIfNotBlank(subject, "workspace", resolve(c.workspace(), cfg.getWorkspace()));
-        putIfNotBlank(subject, "app", resolve(c.app(), cfg.getApp()));
-        putIfNotBlank(subject, "workflow", resolve(c.workflow(), cfg.getWorkflow()));
-        putIfNotBlank(subject, "agent", resolve(c.agent(), cfg.getAgent()));
-        putIfNotBlank(subject, "toolset", resolve(c.toolset(), cfg.getToolset()));
+        ValidationUtils.putIfNotBlank(subject, Constants.TENANT, cyclesValueResolutionService.resolve(Constants.TENANT,c.tenant()));
+        ValidationUtils.putIfNotBlank(subject, Constants.WORKSPACE, cyclesValueResolutionService.resolve(Constants.WORKSPACE,c.workspace()));
+        ValidationUtils.putIfNotBlank(subject, Constants.APP, cyclesValueResolutionService.resolve(Constants.APP,c.app()));
+        ValidationUtils.putIfNotBlank(subject, Constants.WORKFLOW, cyclesValueResolutionService.resolve(Constants.WORKFLOW,c.workflow()));
+        ValidationUtils.putIfNotBlank(subject, Constants.AGENT, cyclesValueResolutionService.resolve(Constants.AGENT,c.agent()));
+        ValidationUtils.putIfNotBlank(subject, Constants.TOOLSET, cyclesValueResolutionService.resolve(Constants.TOOLSET, c.toolset()));
 
         return subject;
     }
@@ -71,11 +77,11 @@ public class CyclesRequestBuilder {
     // -------------------------
     // Action
     // -------------------------
-    private static Map<String, Object> buildAction(Cycles c) {
+    private Map<String, Object> buildAction(Cycles c) {
         Map<String, Object> action = new HashMap<>();
 
-        putIfNotBlank(action, "kind", c.actionKind());
-        putIfNotBlank(action, "name", c.actionName());
+        ValidationUtils.putIfNotBlank(action, "kind", c.actionKind());
+        ValidationUtils.putIfNotBlank(action, "name", c.actionName());
 
         return action;
     }
@@ -98,12 +104,12 @@ public class CyclesRequestBuilder {
     // -------------------------
     // Actual
     // -------------------------
-    private static Map<String, Object> buildActual(Cycles c, long actualAmount) {
+    private Map<String, Object> buildActual(Cycles c, long actualAmount) {
         Map<String, Object> actual = new HashMap<>();
         if (actualAmount < 0) {
             throw new CyclesProtocolException("Actual amount must be >= 0");
         }
-        requireNotBlank(c.unit(), "unit is mandatory");
+        ValidationUtils.requireNotBlank(c.unit(), "unit is mandatory");
         actual.put(Constants.UNIT, c.unit());
         actual.put(Constants.AMOUNT, actualAmount);
         return actual;
@@ -111,42 +117,18 @@ public class CyclesRequestBuilder {
     // -------------------------
     // Validation
     // -------------------------
-    private static void validateReservationMandatory(CyclesProperties cfg,Cycles c, long estimatedAmount) {
-        String tenant = resolve(c.tenant(),cfg.getTenant()) ;
-        requireNotBlank(tenant, "tenant is mandatory");
-        requireNotBlank(c.actionKind(), "actionKind is mandatory");
-        requireNotBlank(c.actionName(), "actionName is mandatory");
+    private void validateReservationMandatory(Cycles c, long estimatedAmount) {
+        String tenant = cyclesValueResolutionService.resolve(Constants.TENANT,c.tenant()) ;
+        ValidationUtils.requireNotBlank(tenant, "tenant is mandatory");
+        ValidationUtils.requireNotBlank(c.actionKind(), "actionKind is mandatory");
+        ValidationUtils.requireNotBlank(c.actionName(), "actionName is mandatory");
 
         if (estimatedAmount < 0) {
             throw new IllegalArgumentException("Estimated amount must be >= 0");
         }
-
-        requireNotBlank(c.unit(), "unit is mandatory");
+        ValidationUtils.requireNotBlank(c.unit(), "unit is mandatory");
     }
 
-    // -------------------------
-    // Helpers
-    // -------------------------
-    private static void putIfNotBlank(Map<String, Object> map, String key, String value) {
-        if (value != null && !value.isBlank()) {
-            map.put(key, value);
-        }
-    }
 
-    private static void requireNotBlank(String value, String message) {
-        if (value == null || value.isBlank()) {
-            throw new CyclesProtocolException(message);
-        }
-    }
-    private static String resolve(String annotationValue, String configValue) {
-        if (annotationValue != null && !annotationValue.isBlank()) {
-            return annotationValue;
-        }
-
-        if (configValue != null && !configValue.isBlank()) {
-            return configValue;
-        }
-        return null;
-    }
 
 }
