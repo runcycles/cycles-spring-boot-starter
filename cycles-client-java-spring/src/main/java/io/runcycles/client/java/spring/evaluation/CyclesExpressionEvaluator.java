@@ -46,9 +46,9 @@ public class CyclesExpressionEvaluator {
 
         long longValue = value.longValue();
 
-        if (longValue <= 0) {
+        if (longValue < 0) {
             throw new IllegalArgumentException(
-                    "Charge amount must be positive. Expression: "
+                    "Charge amount must not be negative. Expression: "
                             + expression + " evaluated to: " + longValue
             );
         }
