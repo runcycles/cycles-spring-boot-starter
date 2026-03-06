@@ -1,7 +1,5 @@
 package io.runcycles.client.java.spring.model;
 
-import org.springframework.util.StringUtils;
-
 import java.util.Map;
 
 public class CyclesResponse <T>{
@@ -31,11 +29,13 @@ public class CyclesResponse <T>{
     }
 
     public static <T> CyclesResponse<T> transportError(Throwable ex) {
-        return new CyclesResponse<>(-1, null, null, true, ex);
+        String message = ex != null ? ex.getMessage() : "Unknown transport error";
+        return new CyclesResponse<>(-1, null, message, true, ex);
     }
     public String getBodyAttributeAsString(String key){
         if (key != null && body != null && body instanceof Map<?, ?> map){
-            return (String)map.get(key) ;
+            Object value = map.get(key);
+            return value != null ? String.valueOf(value) : null;
         }
         return null;
     }
@@ -48,7 +48,7 @@ public class CyclesResponse <T>{
     }
 
     public boolean is5xx() {
-        return status >= 500;
+        return status >= 500 && status < 600;
     }
 
     public boolean isTransportError() {

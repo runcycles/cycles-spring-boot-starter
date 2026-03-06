@@ -32,8 +32,8 @@ public class CyclesAutoConfiguration {
     }
 
     @Bean
-    public CyclesClient cyclesClient(WebClient webClient) {
-        return new DefaultCyclesClient(webClient);
+    public CyclesClient cyclesClient(WebClient cyclesWebClient) {
+        return new DefaultCyclesClient(cyclesWebClient);
     }
 
     @Bean
