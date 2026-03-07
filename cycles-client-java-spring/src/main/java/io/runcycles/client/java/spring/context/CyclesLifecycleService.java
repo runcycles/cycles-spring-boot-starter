@@ -231,7 +231,7 @@ public class CyclesLifecycleService {
     // -------------------------
     // Release
     // -------------------------
-    void handleRelease(String reservationId, String reason) {
+    private void handleRelease(String reservationId, String reason) {
         try {
             LOG.info("Releasing reservation: reservationId={}, reason={}", reservationId, reason);
             CyclesResponse<Map<String, Object>> releaseResponse = client.releaseReservation(reservationId,
@@ -295,7 +295,7 @@ public class CyclesLifecycleService {
         }
     }
 
-    static String resolveEstimateExpression(Cycles cycles) {
+    private static String resolveEstimateExpression(Cycles cycles) {
         boolean hasValue = !cycles.value().isBlank();
         boolean hasEstimate = !cycles.estimate().isBlank();
         if (hasValue && hasEstimate) {
