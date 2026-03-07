@@ -32,4 +32,6 @@ public class CyclesProtocolException extends RuntimeException {
     public boolean isDebtOutstanding() { return errorCode == ErrorCode.DEBT_OUTSTANDING; }
     public boolean isReservationExpired() { return errorCode == ErrorCode.RESERVATION_EXPIRED; }
     public boolean isReservationFinalized() { return errorCode == ErrorCode.RESERVATION_FINALIZED; }
+    public boolean isIdempotencyMismatch() { return errorCode == ErrorCode.IDEMPOTENCY_MISMATCH; }
+    public boolean isUnitMismatch() { return errorCode == ErrorCode.UNIT_MISMATCH; }
 }

@@ -74,6 +74,18 @@ public class CyclesResponse<T> {
         return transportException;
     }
 
+    /**
+     * Parse the body as a typed ErrorResponse if this is an error response.
+     * Returns null if body is not a Map or does not contain a recognizable error envelope.
+     */
+    @SuppressWarnings("unchecked")
+    public ErrorResponse getErrorResponse() {
+        if (body instanceof Map<?, ?> map) {
+            return ErrorResponse.fromMap((Map<String, Object>) map);
+        }
+        return null;
+    }
+
     @Override
     public String toString() {
         return "CyclesResponse{" +
