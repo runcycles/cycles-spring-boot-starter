@@ -17,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
 
@@ -69,7 +70,7 @@ public class CyclesAspect {
         );
         LOG.info("Estimated usage: estimate={}", estimate);
 
-        Map<String, Object> createBody = cyclesRequestBuilderService.buildReservation(cycles, estimate);
+        Map<String, Object> createBody = cyclesRequestBuilderService.buildReservation(cycles, estimate, null);
 
         LOG.info("Creating reservation: createBody={}", createBody);
         long resT1 = System.currentTimeMillis();
@@ -91,6 +92,33 @@ public class CyclesAspect {
         Map<String, Object> capsMap = resBody.get("caps") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
         Caps caps = Caps.fromMap(capsMap);
 
+        @SuppressWarnings("unchecked")
+        List<String> affectedScopes = resBody.get("affected_scopes") instanceof List<?> l
+                ? (List<String>) l : List.of();
+        String scopePath = resBody.get("scope_path") instanceof String s ? s : null;
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> balances = resBody.get("balances") instanceof List<?> l
+                ? (List<Map<String, Object>>) l : null;
+
+        long resT2 = System.currentTimeMillis();
+
+        // dry_run: server evaluates but does not persist — no reservation_id, no commit/release.
+        // Method does NOT execute per spec; no commit/release needed.
+        // Per spec, decision MAY be DENY on dry_run 200 responses, so this must be checked first.
+        if (cycles.dryRun()) {
+            LOG.info("Dry-run reservation evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
+                    (resT2 - resT1), decision, caps, affectedScopes);
+            if (decision == Decision.DENY) {
+                throw new CyclesProtocolException(
+                        "Dry-run denied: " + (reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
+                        ErrorCode.fromString(reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
+                        reasonCode,
+                        reservationResponse.getStatus()
+                );
+            }
+            return null;
+        }
+
         if (decision == Decision.DENY) {
             LOG.error("Reservation denied: decision=DENY, reasonCode={}, response={}", reasonCode, resBody);
             throw new CyclesProtocolException(
@@ -109,12 +137,12 @@ public class CyclesAspect {
             throw new CyclesProtocolException("Failed to create reservation because of missing reservation identifier");
         }
 
-        long resT2 = System.currentTimeMillis();
         LOG.info("Reservation created: elapsedTime={}ms, reservationId={}, decision={}, expiresAtMs={}",
                 (resT2 - resT1), reservationId, decision, expiresAtMs);
 
         CyclesReservationContext ctx = new CyclesReservationContext(
-                reservationId, estimate, decision, caps, expiresAtMs);
+                reservationId, estimate, decision, caps, expiresAtMs,
+                affectedScopes, scopePath, balances);
         CyclesContextHolder.set(ctx);
 
         // Start heartbeat if we have an expiry
@@ -122,7 +150,8 @@ public class CyclesAspect {
 
         try {
             Object result = pjp.proceed();
-            LOG.info("Annotated method finished: reservationId={}", reservationId);
+            long methodElapsed = System.currentTimeMillis() - resT2;
+            LOG.info("Annotated method finished: reservationId={}, methodElapsedMs={}", reservationId, methodElapsed);
 
             long actual;
             if (!cycles.actualExpression().isBlank()) {
@@ -140,7 +169,19 @@ public class CyclesAspect {
                 throw new IllegalStateException("Actual expression required");
             }
 
-            Map<String, Object> commitBody = cyclesRequestBuilderService.buildCommit(cycles, actual);
+            // Pick up metrics and metadata from context (user may have set them during execution)
+            CyclesMetrics metrics = ctx.getMetrics();
+            if (metrics == null) {
+                metrics = new CyclesMetrics();
+            }
+            // Auto-populate latency if not already set
+            if (metrics.getLatencyMs() == null) {
+                metrics.setLatencyMs((int) methodElapsed);
+            }
+            Map<String, Object> commitMetadata = ctx.getCommitMetadata();
+
+            Map<String, Object> commitBody = cyclesRequestBuilderService.buildCommit(
+                    cycles, actual, metrics, commitMetadata);
 
             try {
                 LOG.info("Committing reservation: reservationId={}, commitBody={}", reservationId, commitBody);
@@ -160,7 +201,6 @@ public class CyclesAspect {
                         retryEngine.schedule(reservationId, commitBody);
                     } else if (commitErrorCode == ErrorCode.RESERVATION_FINALIZED
                             || commitErrorCode == ErrorCode.RESERVATION_EXPIRED) {
-                        // Reservation is already in a terminal state — nothing to release
                         LOG.warn("Reservation already finalized/expired, skipping release: reservationId={}, errorCode={}",
                                 reservationId, commitErrorCode);
                     } else if (commitResponse.is4xx()) {
@@ -202,7 +242,7 @@ public class CyclesAspect {
         return heartbeatExecutor.scheduleAtFixedRate(() -> {
             try {
                 LOG.debug("Sending heartbeat extend: reservationId={}", reservationId);
-                Map<String, Object> extendBody = cyclesRequestBuilderService.buildExtend(ttlMs);
+                Map<String, Object> extendBody = cyclesRequestBuilderService.buildExtend(ttlMs, null);
                 CyclesResponse<Map<String, Object>> extendResponse = client.extendReservation(reservationId, extendBody);
                 if (extendResponse.is2xx()) {
                     LOG.debug("Heartbeat extend successful: reservationId={}", reservationId);
@@ -229,7 +269,11 @@ public class CyclesAspect {
         ErrorCode errorCode = extractErrorCode(response);
         // ErrorResponse uses "error" field (the ErrorCode), not "reason_code" (which is only in 2xx responses)
         String errorField = response.getBodyAttributeAsString("error");
+        String requestId = response.getBodyAttributeAsString("request_id");
         String message = prefix + ": " + (response.getErrorMessage() != null ? response.getErrorMessage() : "unknown error");
+        if (requestId != null) {
+            LOG.error("Server error response: requestId={}, errorCode={}, status={}", requestId, errorField, response.getStatus());
+        }
         return new CyclesProtocolException(message, errorCode, errorField, response.getStatus());
     }
 
