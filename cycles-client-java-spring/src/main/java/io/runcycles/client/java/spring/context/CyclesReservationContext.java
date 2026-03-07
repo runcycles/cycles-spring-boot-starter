@@ -4,6 +4,7 @@ import io.runcycles.client.java.spring.model.Caps;
 import io.runcycles.client.java.spring.model.CyclesMetrics;
 import io.runcycles.client.java.spring.model.Decision;
 
+import java.util.List;
 import java.util.Map;
 
 public class CyclesReservationContext {
@@ -13,6 +14,9 @@ public class CyclesReservationContext {
     private final Decision decision;
     private final Caps caps;
     private final Long expiresAtMs;
+    private final List<String> affectedScopes;
+    private final String scopePath;
+    private final List<Map<String, Object>> balances;
 
     // Mutable fields: users can set these during guarded method execution
     // and the aspect will pick them up at commit time.
@@ -20,12 +24,17 @@ public class CyclesReservationContext {
     private Map<String, Object> commitMetadata;
 
     public CyclesReservationContext(String reservationId, long estimate,
-                                   Decision decision, Caps caps, Long expiresAtMs) {
+                                   Decision decision, Caps caps, Long expiresAtMs,
+                                   List<String> affectedScopes, String scopePath,
+                                   List<Map<String, Object>> balances) {
         this.reservationId = reservationId;
         this.estimate = estimate;
         this.decision = decision;
         this.caps = caps;
         this.expiresAtMs = expiresAtMs;
+        this.affectedScopes = affectedScopes;
+        this.scopePath = scopePath;
+        this.balances = balances;
     }
 
     public String getReservationId() { return reservationId; }
@@ -33,6 +42,9 @@ public class CyclesReservationContext {
     public Decision getDecision() { return decision; }
     public Caps getCaps() { return caps; }
     public Long getExpiresAtMs() { return expiresAtMs; }
+    public List<String> getAffectedScopes() { return affectedScopes; }
+    public String getScopePath() { return scopePath; }
+    public List<Map<String, Object>> getBalances() { return balances; }
 
     public boolean hasCaps() { return caps != null; }
     public boolean isExpiringSoon(long thresholdMs) {

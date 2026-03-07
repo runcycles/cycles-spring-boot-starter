@@ -17,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
 
@@ -91,6 +92,14 @@ public class CyclesAspect {
         Map<String, Object> capsMap = resBody.get("caps") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
         Caps caps = Caps.fromMap(capsMap);
 
+        @SuppressWarnings("unchecked")
+        List<String> affectedScopes = resBody.get("affected_scopes") instanceof List<?> l
+                ? (List<String>) l : List.of();
+        String scopePath = resBody.get("scope_path") instanceof String s ? s : null;
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> balances = resBody.get("balances") instanceof List<?> l
+                ? (List<Map<String, Object>>) l : null;
+
         long resT2 = System.currentTimeMillis();
 
         // dry_run: server evaluates but does not persist — no reservation_id, no commit/release.
@@ -98,7 +107,7 @@ public class CyclesAspect {
         // Per spec, decision MAY be DENY on dry_run 200 responses, so this must be checked first.
         if (cycles.dryRun()) {
             LOG.info("Dry-run reservation evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
-                    (resT2 - resT1), decision, caps, resBody.get("affected_scopes"));
+                    (resT2 - resT1), decision, caps, affectedScopes);
             return null;
         }
 
@@ -124,7 +133,8 @@ public class CyclesAspect {
                 (resT2 - resT1), reservationId, decision, expiresAtMs);
 
         CyclesReservationContext ctx = new CyclesReservationContext(
-                reservationId, estimate, decision, caps, expiresAtMs);
+                reservationId, estimate, decision, caps, expiresAtMs,
+                affectedScopes, scopePath, balances);
         CyclesContextHolder.set(ctx);
 
         // Start heartbeat if we have an expiry
