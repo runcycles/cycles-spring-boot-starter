@@ -126,7 +126,7 @@ public class CyclesLifecycleService {
             }
             LOG.info("Dry-run evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
                     elapsedMs, decision, caps, affectedScopes);
-            return new DryRunResult(decision, caps, affectedScopes, scopePath, reserved, balances, retryAfterMs);
+            return new DryRunResult(decision, caps, affectedScopes, scopePath, reserved, balances, reasonCode, retryAfterMs);
         }
 
         // Handle DENY
