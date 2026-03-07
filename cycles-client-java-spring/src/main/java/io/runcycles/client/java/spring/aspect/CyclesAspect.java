@@ -133,7 +133,7 @@ public class CyclesAspect {
             return result;
 
         } catch (Throwable ex) {
-            LOG.error("Failed to process Cycles budget aspect: cycles={}", cycles,ex);
+            LOG.error("Guarded method execution failed, releasing reservation: reservationId={}, cycles={}", reservationId, cycles, ex);
             handleReleaseReservation(reservationId);
             throw ex;
         } finally {
@@ -156,7 +156,7 @@ public class CyclesAspect {
                 LOG.info("Reservation released successfully: reservationId={}, responseBody={}",reservationId,releaseResponse.getBody());
             }
             else {
-                LOG.info("Reservation released failed or is unknown: reservationId={}, errorMessage={}, responseBody={}",reservationId,releaseResponse.getErrorMessage(),releaseResponse.getBody());
+                LOG.warn("Reservation release failed or is unknown: reservationId={}, errorMessage={}, responseBody={}",reservationId,releaseResponse.getErrorMessage(),releaseResponse.getBody());
             }
         } catch (Exception ignored) {LOG.error("Failed to release reservation on main failure: reservationId={}",reservationId,ignored);}
     }
