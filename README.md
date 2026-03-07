@@ -61,31 +61,37 @@ That's it. The aspect will automatically:
 ### The Reserve / Commit / Release Lifecycle
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  @Cycles method invocation                              │
-│                                                         │
-│  1. Evaluate estimateExpression                         │
-│  2. POST /v1/reservations  ──→  ALLOW / DENY            │
-│     ├─ DENY  → throw CyclesProtocolException            │
-│     └─ ALLOW → continue                                 │
-│  3. Execute the guarded method                          │
-│     ├─ Success → evaluate actualExpression              │
-│     │            POST /v1/reservations/{id}/commit       │
-│     └─ Failure → POST /v1/reservations/{id}/release     │
-│  4. Heartbeat extends TTL for long-running methods      │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  @Cycles method invocation                                   │
+│                                                              │
+│  1. Evaluate estimateExpression → Amount(unit, amount)       │
+│  2. POST /v1/reservations                                    │
+│     ├─ 409 (BUDGET_EXCEEDED / OVERDRAFT / DEBT)              │
+│     │   → throw CyclesProtocolException (method never runs)  │
+│     ├─ 200 ALLOW → reservation created, continue             │
+│     └─ 200 ALLOW_WITH_CAPS → Caps available via context      │
+│  3. Start heartbeat (POST .../extend at ttlMs/2 intervals)  │
+│  4. Execute the guarded method                               │
+│     ├─ Success → evaluate actualExpression                   │
+│     │            POST /v1/reservations/{id}/commit            │
+│     │            (retries on transient failure)               │
+│     └─ Failure → POST /v1/reservations/{id}/release          │
+│  5. Cancel heartbeat, clear CyclesContextHolder              │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Decisions
 
 The Cycles server returns one of three decisions on reservation:
 
-| Decision | Meaning |
-|---|---|
-| `ALLOW` | Budget available, reservation created |
-| `ALLOW_WITH_CAPS` | Budget available with constraints (e.g., reduced token limits) |
-| `DENY` | Insufficient budget, method will not execute |
+| Decision | HTTP | Meaning |
+|---|---|---|
+| `ALLOW` | 200 | Budget available, reservation created |
+| `ALLOW_WITH_CAPS` | 200 | Budget available with soft constraints (e.g., reduced token limits) |
+| `DENY` | 409 | Insufficient budget — expressed as an HTTP 409 error with an `ErrorCode` |
+
+Per the spec, budget denials for non-dry-run reservations are expressed as HTTP 409 responses (not a 200 with `decision=DENY`). The starter throws a `CyclesProtocolException` for all non-2xx responses.
 
 When `ALLOW_WITH_CAPS` is returned, the `Caps` object is available via `CyclesContextHolder` inside your method (see [Accessing Caps](#accessing-caps-in-your-method)).
 
@@ -229,16 +235,17 @@ Error codes from the protocol:
 
 | ErrorCode | HTTP | Meaning |
 |---|---|---|
-| `BUDGET_EXCEEDED` | 409 | Insufficient budget |
-| `OVERDRAFT_LIMIT_EXCEEDED` | 409 | Debt exceeds overdraft limit |
-| `DEBT_OUTSTANDING` | 409 | Outstanding debt blocks new reservations |
-| `RESERVATION_EXPIRED` | 410 | Reservation TTL + grace period elapsed |
-| `RESERVATION_FINALIZED` | 409 | Already committed or released |
-| `UNIT_MISMATCH` | 400 | Commit unit differs from reservation unit |
-| `IDEMPOTENCY_MISMATCH` | 409 | Same idempotency key, different payload |
+| `INVALID_REQUEST` | 400 | Malformed request (missing required fields, invalid values) |
 | `UNAUTHORIZED` | 401 | Invalid or missing API key |
-| `FORBIDDEN` | 403 | Tenant mismatch |
+| `FORBIDDEN` | 403 | Tenant mismatch (subject.tenant vs effective tenant) |
 | `NOT_FOUND` | 404 | Reservation does not exist |
+| `BUDGET_EXCEEDED` | 409 | Insufficient budget for reservation or commit |
+| `OVERDRAFT_LIMIT_EXCEEDED` | 409 | Debt exceeds overdraft limit, or scope is over-limit |
+| `DEBT_OUTSTANDING` | 409 | Outstanding debt blocks new reservations |
+| `RESERVATION_FINALIZED` | 409 | Reservation already committed or released |
+| `IDEMPOTENCY_MISMATCH` | 409 | Same idempotency key with different payload |
+| `UNIT_MISMATCH` | 400 | Commit unit differs from reservation unit |
+| `RESERVATION_EXPIRED` | 410 | Reservation TTL + grace period elapsed |
 | `INTERNAL_ERROR` | 500 | Server error |
 
 ## Subject Field Resolution
@@ -333,9 +340,35 @@ cycles-spring-boot-starter/
 └── cycles-demo-client-java-spring/    # Demo application
 ```
 
-## Protocol Spec
+## Protocol Spec Coverage
 
 This starter implements the [Cycles Protocol v0](https://github.com/runcycles/cycles-protocol/blob/main/cycles-protocol-v0.yaml) (v0.1.23).
+
+### Implemented
+
+| Endpoint | Status |
+|---|---|
+| `POST /v1/reservations` (create) | Implemented |
+| `POST /v1/reservations/{id}/commit` | Implemented |
+| `POST /v1/reservations/{id}/release` | Implemented |
+| `POST /v1/reservations/{id}/extend` | Implemented |
+
+### Not Yet Implemented
+
+These are optional or supplementary features defined in the spec but not yet supported by this starter:
+
+| Feature | Spec Reference | Notes |
+|---|---|---|
+| `POST /v1/decide` | Optional preflight endpoint | No reservation created; use for soft-landing checks |
+| `GET /v1/reservations` | Optional list/recovery endpoint | For debugging stuck reservations |
+| `GET /v1/reservations/{id}` | Optional detail endpoint | For monitoring long-running operations |
+| `GET /v1/balances` | Optional balance query | Operator visibility |
+| `POST /v1/events` | Optional post-only accounting | For non-estimable actions (no reservation) |
+| `dry_run` on reservation | Shadow-mode evaluation | Evaluates without persisting or locking budget |
+| `metrics` on commit | `StandardMetrics` schema | `tokens_input`, `tokens_output`, `latency_ms`, `model_version` |
+| `metadata` on requests | Optional opaque object | Audit/debugging metadata on reserve, commit, extend |
+| `X-Idempotency-Key` header | Optional header | Body `idempotency_key` is always sent; header is not |
+| `Subject.dimensions` | Optional custom dimensions | Spec says v0 servers MAY ignore; not sent by starter |
 
 ## License
 
