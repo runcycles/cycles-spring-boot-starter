@@ -227,13 +227,14 @@ public class CyclesAspect {
     // -------------------------
     private CyclesProtocolException buildProtocolException(String prefix, CyclesResponse<Map<String, Object>> response) {
         ErrorCode errorCode = extractErrorCode(response);
-        String reasonCode = response.getBodyAttributeAsString("reason_code");
+        // ErrorResponse uses "error" field (the ErrorCode), not "reason_code" (which is only in 2xx responses)
+        String errorField = response.getBodyAttributeAsString("error");
         String message = prefix + ": " + (response.getErrorMessage() != null ? response.getErrorMessage() : "unknown error");
-        return new CyclesProtocolException(message, errorCode, reasonCode, response.getStatus());
+        return new CyclesProtocolException(message, errorCode, errorField, response.getStatus());
     }
 
     private ErrorCode extractErrorCode(CyclesResponse<Map<String, Object>> response) {
-        String errorCodeStr = response.getBodyAttributeAsString("error_code");
+        String errorCodeStr = response.getBodyAttributeAsString("error");
         if (errorCodeStr == null) {
             errorCodeStr = response.getBodyAttributeAsString("reason_code");
         }
