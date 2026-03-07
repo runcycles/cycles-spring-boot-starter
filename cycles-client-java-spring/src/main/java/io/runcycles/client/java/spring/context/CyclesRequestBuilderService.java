@@ -36,9 +36,17 @@ public class CyclesRequestBuilderService {
         body.put("estimate", estimate);
 
         if (cycles.ttlMs() > 0) {
+            if (cycles.ttlMs() < 1000 || cycles.ttlMs() > 86400000) {
+                throw new CyclesProtocolException(
+                        "ttl_ms must be between 1000 and 86400000, got: " + cycles.ttlMs());
+            }
             body.put("ttl_ms", cycles.ttlMs());
         }
         if (cycles.gracePeriodMs() >= 0) {
+            if (cycles.gracePeriodMs() > 60000) {
+                throw new CyclesProtocolException(
+                        "grace_period_ms must be between 0 and 60000, got: " + cycles.gracePeriodMs());
+            }
             body.put("grace_period_ms", cycles.gracePeriodMs());
         }
 
@@ -57,8 +65,8 @@ public class CyclesRequestBuilderService {
     }
 
     public Map<String, Object> buildExtend(long extendByMs, Map<String, Object> metadata) {
-        if (extendByMs <= 0) {
-            throw new CyclesProtocolException("extend_by_ms must be > 0");
+        if (extendByMs < 1 || extendByMs > 86400000) {
+            throw new CyclesProtocolException("extend_by_ms must be between 1 and 86400000, got: " + extendByMs);
         }
         Map<String, Object> body = new HashMap<>();
         body.put(Constants.IDEMPOTENCY_KEY, UUID.randomUUID().toString());

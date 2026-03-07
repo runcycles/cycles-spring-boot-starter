@@ -105,6 +105,15 @@ public class CyclesLifecycleService {
 
         long resT2 = System.currentTimeMillis();
 
+        // Validate decision field
+        if (decision == null) {
+            String rawDecision = reservationResponse.getBodyAttributeAsString("decision");
+            LOG.error("Unrecognized decision value from server: decision={}, response={}", rawDecision, resBody);
+            throw new CyclesProtocolException(
+                    "Unrecognized decision value: " + rawDecision,
+                    ErrorCode.INTERNAL_ERROR, null, reservationResponse.getStatus());
+        }
+
         // Handle dry-run
         if (cycles.dryRun()) {
             return handleDryRun(decision, reasonCode, caps, affectedScopes,
@@ -142,7 +151,7 @@ public class CyclesLifecycleService {
                 affectedScopes, scopePath, reserved, balances);
         CyclesContextHolder.set(ctx);
 
-        ScheduledFuture<?> heartbeatFuture = scheduleHeartbeat(reservationId, cycles.ttlMs(), expiresAtMs);
+        ScheduledFuture<?> heartbeatFuture = scheduleHeartbeat(reservationId, cycles.ttlMs(), expiresAtMs, ctx);
 
         try {
             // Execute guarded action
@@ -258,7 +267,8 @@ public class CyclesLifecycleService {
     // -------------------------
     // Heartbeat
     // -------------------------
-    private ScheduledFuture<?> scheduleHeartbeat(String reservationId, long ttlMs, Long expiresAtMs) {
+    private ScheduledFuture<?> scheduleHeartbeat(String reservationId, long ttlMs,
+                                                  Long expiresAtMs, CyclesReservationContext ctx) {
         if (expiresAtMs == null || ttlMs <= 0) {
             return null;
         }
@@ -274,10 +284,7 @@ public class CyclesLifecycleService {
                     Long newExpiresAtMs = extBody != null && extBody.get("expires_at_ms") instanceof Number n
                             ? n.longValue() : null;
                     if (newExpiresAtMs != null) {
-                        CyclesReservationContext ctx = CyclesContextHolder.get();
-                        if (ctx != null) {
-                            ctx.updateExpiresAtMs(newExpiresAtMs);
-                        }
+                        ctx.updateExpiresAtMs(newExpiresAtMs);
                     }
                     LOG.debug("Heartbeat extend successful: reservationId={}, newExpiresAtMs={}",
                             reservationId, newExpiresAtMs);
