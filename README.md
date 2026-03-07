@@ -1,269 +1,342 @@
-# Cycles: The Economic Governance Layer for Spring AI
+# Cycles Spring Boot Starter
 
-[![Maven Central](https://img.shields.io/maven-central/v/io.cycles/cycles-spring-boot-starter.svg?label=Maven%20Central)](https://search.maven.org/search?q=g:%22io.cycles%22%20AND%20a:%22cycles-spring-boot-starter%22)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Status](https://img.shields.io/badge/Status-Private%20Beta-orange)]()
 
-**An economic circuit breaker for autonomous agents.**
+A Spring Boot starter that integrates with the [Cycles Budget Authority](https://github.com/runcycles/cycles-protocol) — a deterministic spend governance protocol for agent runtimes.
 
-Cycles is a JVM-level **economic governance layer** for Spring Boot applications.
-It enforces **deterministic spend limits** on guarded AI execution—preventing infinite loops, runaway recursion, and API bill shock *before* they happen.
+Cycles enforces budget reservations around guarded method executions using a **reserve / execute / commit** lifecycle. If the budget is exceeded, execution is denied before the guarded code runs.
 
-Rate limits control **velocity**.  
-**Cycles controls exposure.**
+## Quick Start
 
----
-
-## 🛑 The Problem: "The $5,000 Loop"
-
-You deploy an agent to summarize daily news.  
-A prompt bug causes it to retry endlessly on a `500` error from the provider.  
-You have a standard rate limiter (`100 req/min`).
-
-**What happens:**
-
-- **00:00** — Agent starts looping  
-- **00:10** — Rate limiter allows ~1,000 calls  
-- **01:00** — ~6,000 calls  
-- **08:00** — You wake up to a **$4,500 OpenAI bill**
-
-**Rate limits do not stop bad logic. They only slow it down.**
-
----
-
-## ⚡ The Solution: Economic Governance
-
-Cycles introduces a new primitive: **The Cycle**.
-
-> **1 Cycle = 1 Unit of Execution Risk** > (e.g., $0.01 USD, 1 Token, or a weighted complexity score)
-
-Instead of limiting *requests per second*, Cycles limits **total risk per execution** (across the entire call graph).
-
-As the budget tightens, Cycles **degrades behavior according to policy**.  
-When the budget is exhausted, execution **halts deterministically**.
-
----
-
-## 🚀 Quick Start (Zero Config)
-
-By default, Cycles runs in **Local Mode** (in-memory) with a global safety net.
-Add the dependency and start coding.
+### 1. Add the dependency
 
 ```xml
 <dependency>
-  <groupId>io.cycles</groupId>
-  <artifactId>cycles-spring-boot-starter</artifactId>
-  <version>0.1.0-beta</version>
+    <groupId>io.runcycles</groupId>
+    <artifactId>cycles-client-java-spring</artifactId>
+    <version>0.1.0</version>
 </dependency>
-
 ```
 
-Add a global guardrail to `application.yml`:
+Requires Java 21+ and Spring Boot 3.3+.
+
+### 2. Configure the connection
 
 ```yaml
 cycles:
-  enabled: true
-  # Global safety net: No single execution may exceed 100 cycles ($1.00)
-  global-budget: 100
-
+  api-key: your-api-key
+  base-url: http://localhost:7878
+  tenant: my-tenant
+  workspace: development
+  app: my-app
 ```
 
----
-
-## ✨ Usage: The Annotation
-
-Add one annotation to define an **economic envelope** for an execution.
-
-### 1. Hard Enforcement (Production)
-
-If the budget is exceeded, the thread is interrupted and a `CycleExhaustedException` is thrown.
+### 3. Annotate your method
 
 ```java
 @Service
-public class ResearchAgent {
+public class LlmService {
 
-    private final OpenAiClient ai;
-
-    // 🛑 HARD STOP: If this method (and its sub-calls) burns > 50 Cycles,
-    // execution halts deterministically.
-    @Cycles(limit = 50)
-    public Report generateMarketReport(String ticker) {
-
-        // Even if this call loops indefinitely,
-        // execution will stop once the budget is exhausted.
-        return ai.recursiveDeepDive(ticker);
+    @Cycles(
+            actionKind = "llm.completion",
+            actionName = "gpt-4",
+            estimateExpression = "#p1 * 10",
+            actualExpression = "#result.length() * 5"
+    )
+    public String generateText(String prompt, int tokens) {
+        // Your LLM call here
+        return callProvider(prompt, tokens);
     }
 }
-
 ```
 
-### 2. Shadow Mode (Safe Trial)
+That's it. The aspect will automatically:
+1. **Reserve** budget before the method runs (using the estimated amount)
+2. **Execute** your method if the reservation is allowed
+3. **Commit** the actual usage after the method completes
+4. **Release** the reservation if the method throws an exception
 
-Not ready to kill processes yet? Use `REPORT_ONLY` mode.
-Cycles tracks spend and emits "Red" alert events, but **does not stop execution**.
+## How It Works
 
-```java
-// 🛡️ SHADOW MODE: Logs the potential kill, but lets the agent live.
-@Cycles(limit = 50, mode = EnforcementMode.REPORT_ONLY)
-public void betaTestAgent() {
-    // Execution continues even after 50 cycles, budget overruns are logged.
-}
+### The Reserve / Commit / Release Lifecycle
 
 ```
+┌─────────────────────────────────────────────────────────┐
+│  @Cycles method invocation                              │
+│                                                         │
+│  1. Evaluate estimateExpression                         │
+│  2. POST /v1/reservations  ──→  ALLOW / DENY            │
+│     ├─ DENY  → throw CyclesProtocolException            │
+│     └─ ALLOW → continue                                 │
+│  3. Execute the guarded method                          │
+│     ├─ Success → evaluate actualExpression              │
+│     │            POST /v1/reservations/{id}/commit       │
+│     └─ Failure → POST /v1/reservations/{id}/release     │
+│  4. Heartbeat extends TTL for long-running methods      │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
 
----
+### Decisions
 
-## ⚙️ Advanced Configuration (Enterprise)
+The Cycles server returns one of three decisions on reservation:
 
-For complex agent fleets, Cycles supports **profiles**, **degradation policies**, and **shared team budgets**.
+| Decision | Meaning |
+|---|---|
+| `ALLOW` | Budget available, reservation created |
+| `ALLOW_WITH_CAPS` | Budget available with constraints (e.g., reduced token limits) |
+| `DENY` | Insufficient budget, method will not execute |
 
-### Example: "Degrade, Then Halt" Policy
+When `ALLOW_WITH_CAPS` is returned, the `Caps` object is available via `CyclesContextHolder` inside your method (see [Accessing Caps](#accessing-caps-in-your-method)).
 
-This profile warns at 70%, degrades model quality at 90%, and halts at 100%.
+## Configuration Reference
+
+### Connection Properties
 
 ```yaml
 cycles:
-  enabled: true
-  storage: redis
+  api-key: ""              # X-Cycles-API-Key header (required)
+  base-url: ""             # Cycles server URL (required)
 
-  redis:
-    host: localhost
-    port: 6379
+  # Default subject fields (can be overridden per-annotation)
+  tenant: ""
+  workspace: ""
+  app: ""
+  workflow: ""
+  agent: ""
+  toolset: ""
 
-  profiles:
-    agent-default:
-      description: "Standard agent profile with progressive degradation"
+  # HTTP client settings
+  http:
+    connect-timeout: 2s
+    read-timeout: 5s
 
-      buckets:
-        - name: execution
-          scope: EXECUTION
-          key: "{executionId}"
-          initialLimit: 200
-
-          # 🚦 Warning Thresholds
-          thresholds:
-            spent:
-              yellow: 0.70  # Warn
-              orange: 0.90  # Degrade
-              red: 1.00     # Halt
-
-        - name: group
-          scope: GROUP
-          key: "{teamId}"
-          initialLimit: 5000 # Daily team budget
-
-      policies:
-        green:
-          allow:
-            actions: ["*"]
-
-        # 🟡 Phase 1: Throttle & Reduce Quality
-        yellow:
-          degrade:
-            modelTier: downgrade      # Switch GPT-4 -> GPT-3.5
-            contextWindow: reduce     # Shrink context
-          throttle:
-            minDelayMs: 250
-
-        # 🟠 Phase 2: Block Writes & Expensive Tools
-        orange:
-          block:
-            actions: [WRITE, EXECUTE_TOOL, DEPLOY]
-          throttle:
-            minDelayMs: 1000
-          retries:
-            max: 1
-
-        # 🔴 Phase 3: Kill Switch
-        red:
-          onExhaust: HALT
-          emit:
-            mode: PARTIAL_RESULT      # Return what we have so far
-          fallback:
-            strategy: SUMMARY_ONLY
-
+  # Commit retry settings (exponential backoff)
+  retry:
+    enabled: true
+    max-attempts: 5
+    initial-delay: 500ms
+    multiplier: 2.0
+    max-delay: 30s
 ```
 
----
+### `@Cycles` Annotation
 
-## ⚠️ Enforcement Model
+| Parameter | Required | Default | Description |
+|---|---|---|---|
+| `actionKind` | Yes | — | Action category (e.g., `llm.completion`, `tool.search`) |
+| `actionName` | Yes | — | Action identifier (e.g., `gpt-4`, `web.search`) |
+| `estimateExpression` | Yes | — | SpEL expression for estimated cost |
+| `actualExpression` | No | `""` | SpEL expression for actual cost (evaluated after method returns) |
+| `actionTags` | No | `{}` | Policy tags (e.g., `{"prod", "customer-facing"}`) |
+| `useEstimatedIfActualNotProvided` | No | `false` | Use estimate as actual when `actualExpression` is blank |
+| `unit` | No | `USD_MICROCENTS` | Cost unit: `USD_MICROCENTS`, `TOKENS`, `CREDITS`, `RISK_POINTS` |
+| `ttlMs` | No | `60000` | Reservation TTL in milliseconds (1,000–86,400,000) |
+| `gracePeriodMs` | No | `-1` (server default) | Grace period for late commits (0–60,000 ms, server default: 5,000) |
+| `overagePolicy` | No | `REJECT` | `REJECT`, `ALLOW_IF_AVAILABLE`, or `ALLOW_WITH_OVERDRAFT` |
+| `tenant` | No | `""` | Override tenant (falls back to config, then resolver) |
+| `workspace` | No | `""` | Override workspace |
+| `app` | No | `""` | Override app |
+| `workflow` | No | `""` | Override workflow |
+| `agent` | No | `""` | Override agent |
+| `toolset` | No | `""` | Override toolset |
 
-Cycles enforces budgets **only on guarded code paths** (via `@Cycles` and Spring AOP interception).
+### SpEL Expressions
 
-* **Guarded Execution:** Budgets enforced deterministically.
-* **Unguarded Execution:** Allowed, but surfaced in the dashboard (Passive Monitoring).
+Estimate and actual expressions are evaluated as SpEL with these variables available:
 
-This allows teams to:
+| Variable | Description |
+|---|---|
+| `#p0`, `#p1`, ... | Method parameters by index |
+| `#paramName` | Method parameters by name (requires `-parameters` compiler flag) |
+| `#result` | Method return value (only available in `actualExpression`) |
+| `#args` | All method arguments as an array |
+| `#target` | The target object (the bean instance) |
 
-1. Start with visibility.
-2. Progressively harden enforcement.
-3. Avoid breaking legacy systems.
+Examples:
+```java
+// Estimate based on requested token count (2nd parameter)
+estimateExpression = "#p1 * 10"
 
----
+// Actual based on response length
+actualExpression = "#result.length() * 5"
 
-## 🏗️ Architecture & Performance
+// Fixed estimate
+estimateExpression = "1000"
 
-Cycles is designed for **Macro-Governance**, not micro-benchmarking. It uses an **Atomic Authorize-and-Burn** interceptor pattern.
-
-| Component | Responsibility | Typical Cost |
-| --- | --- | --- |
-| **Interceptor** | Pauses execution to check budget | < 0.1ms |
-| **Ledger (Redis)** | Atomic authorize + decrement (Lua) | ~1-3ms (Network RTT) |
-| **Enforcer** | Halts guarded execution | 0ms |
-
-**⚠️ Performance Note:**
-Do not put `@Cycles` on a tight `for-loop` that runs 1,000 times per second.
-Annotate **Service Boundaries** (e.g., `generateReport`, `executeTool`, `callModel`).
-The 3ms overhead is negligible compared to the 500ms+ latency of an LLM call.
-
----
-
-## 🚨 The Panic Button (Actuator)
-
-Agent stuck in a loop *right now*? Don't redeploy.
-Cycles exposes a Spring Boot Actuator endpoint to hot-patch budgets live.
-
-```bash
-# Emergency: Boost budget by 500 cycles for an active agent
-curl -X POST http://localhost:8080/actuator/cycles/ledger/agent-007/topup \
-     -d '{"amount": 500}'
-
+// Use estimated as actual (no actualExpression needed)
+useEstimatedIfActualNotProvided = true
 ```
 
----
+## Accessing Caps in Your Method
 
-## 🆚 Cycles vs. Rate Limiters
+When the server returns `ALLOW_WITH_CAPS`, you can read the constraints inside your guarded method:
 
-| Feature | Rate Limiter (Resilience4j / Bucket4j) | Cycles (Economic Governance) |
-| --- | --- | --- |
-| **Metric** | Requests / Second | **Risk / Execution** |
-| **Goal** | Protect the *Server* from overload | Protect the *Wallet* from bankruptcy |
-| **Outcome** | Throttles traffic (Slows down) | **Degrade → Restrict → Halt Execution** |
-| **Context** | Single Service | **Distributed Call Graph** (A calls B calls C) |
-| **Use Case** | High Traffic APIs | **Autonomous Agents & LLMs** |
+```java
+@Cycles(
+        actionKind = "llm.completion",
+        actionName = "gpt-4",
+        estimateExpression = "#tokens * 10",
+        actualExpression = "#result.length() * 5"
+)
+public String generate(String prompt, int tokens) {
+    CyclesReservationContext ctx = CyclesContextHolder.get();
 
----
+    if (ctx.hasCaps()) {
+        Caps caps = ctx.getCaps();
 
-## 🔮 Roadmap
+        // Reduce tokens if capped
+        if (caps.getMaxTokens() != null) {
+            tokens = Math.min(tokens, caps.getMaxTokens());
+        }
 
-* **v0.1:** Local Redis implementation & Spring AOP. (Beta)
-* **v0.5:** Dashboard for real-time monitoring.
-* **v1.0:** `X-Cycles-Budget` HTTP Context propagation for cross-service governance.
+        // Check if a tool is allowed
+        if (!caps.isToolAllowed("web_search")) {
+            // skip web search
+        }
+    }
 
----
+    return callLlm(prompt, tokens);
+}
+```
 
-## 🤝 Join the Private Beta
+Available `Caps` fields: `maxTokens`, `maxStepsRemaining`, `toolAllowlist`, `toolDenylist`, `cooldownMs`.
 
-We are currently onboarding **Enterprise Java teams** deploying agentic workflows for the private beta.
-If you are running Spring AI in production and worry about cost, let's talk.
+## Error Handling
 
-**[👉 Request Access to the JAR](https://docs.google.com/forms/d/e/1FAIpQLSd4FB1W_NrmHqf873lUUSP2V6_uWEVG2J6OteQ9hM8yWynKNQ/viewform?usp=dialog)**
+When a reservation is denied or a protocol error occurs, a `CyclesProtocolException` is thrown:
 
-*(Auditing slots available for Q1 2026)*
+```java
+try {
+    llmService.generateText(prompt, tokens);
+} catch (CyclesProtocolException e) {
+    ErrorCode code = e.getErrorCode();
 
----
+    if (e.isBudgetExceeded()) {
+        // Budget exhausted — show user a friendly message
+    } else if (e.isOverdraftLimitExceeded()) {
+        // Debt limit reached
+    }
 
-**License:** Apache 2.0
-**Maintained by:** Albert / RunCycles.io
+    // Also available:
+    // e.getHttpStatus()
+    // e.getReasonCode()
+    // e.getMessage()
+}
+```
+
+Error codes from the protocol:
+
+| ErrorCode | HTTP | Meaning |
+|---|---|---|
+| `BUDGET_EXCEEDED` | 409 | Insufficient budget |
+| `OVERDRAFT_LIMIT_EXCEEDED` | 409 | Debt exceeds overdraft limit |
+| `DEBT_OUTSTANDING` | 409 | Outstanding debt blocks new reservations |
+| `RESERVATION_EXPIRED` | 410 | Reservation TTL + grace period elapsed |
+| `RESERVATION_FINALIZED` | 409 | Already committed or released |
+| `UNIT_MISMATCH` | 400 | Commit unit differs from reservation unit |
+| `IDEMPOTENCY_MISMATCH` | 409 | Same idempotency key, different payload |
+| `UNAUTHORIZED` | 401 | Invalid or missing API key |
+| `FORBIDDEN` | 403 | Tenant mismatch |
+| `NOT_FOUND` | 404 | Reservation does not exist |
+| `INTERNAL_ERROR` | 500 | Server error |
+
+## Subject Field Resolution
+
+Subject fields (`tenant`, `workspace`, `app`, `workflow`, `agent`, `toolset`) are resolved in order:
+
+1. **Annotation value** — `@Cycles(tenant = "my-tenant")`
+2. **Configuration** — `cycles.tenant=my-tenant` in `application.yml`
+3. **Dynamic resolver** — a Spring bean implementing `CyclesFieldResolver`
+
+### Custom Resolver Example
+
+Register a bean named after the field to resolve it dynamically at runtime:
+
+```java
+@Component("tenant")
+public class TenantResolver implements CyclesFieldResolver {
+
+    @Autowired
+    private TenantService tenantService;
+
+    @Override
+    public String resolve() {
+        return tenantService.getCurrentTenant();
+    }
+}
+```
+
+## Heartbeat (Automatic TTL Extension)
+
+For long-running methods, the starter automatically extends the reservation TTL via the `/v1/reservations/{id}/extend` endpoint. The heartbeat fires at `ttlMs / 2` intervals to prevent the reservation from expiring while the method is still executing.
+
+No configuration needed — it activates automatically when the server returns an `expires_at_ms` in the reservation response.
+
+## Commit Retry
+
+If a commit fails due to a transient error (network failure or 5xx), the starter automatically retries with exponential backoff using a background thread. Configure via:
+
+```yaml
+cycles:
+  retry:
+    enabled: true           # default: true
+    max-attempts: 5          # default: 5
+    initial-delay: 500ms     # default: 500ms
+    multiplier: 2.0          # default: 2.0
+    max-delay: 30s           # default: 30s
+```
+
+## Customization
+
+All beans are created with `@ConditionalOnMissingBean`, so you can override any component:
+
+```java
+@Bean
+public CyclesClient cyclesClient() {
+    // Custom HTTP client implementation
+    return new MyCyclesClient();
+}
+
+@Bean(name = "cyclesWebClient")
+public WebClient cyclesWebClient() {
+    // Custom WebClient with additional headers, interceptors, etc.
+    return WebClient.builder()
+            .baseUrl("https://cycles.example.com")
+            .defaultHeader("X-Cycles-API-Key", "my-key")
+            .build();
+}
+
+@Bean
+public CommitRetryEngine retryEngine() {
+    // Custom retry strategy (e.g., persistent queue)
+    return new MyPersistentRetryEngine();
+}
+```
+
+## Project Structure
 
 ```
+cycles-spring-boot-starter/
+├── cycles-client-java-spring/         # The starter library
+│   └── src/main/java/io/runcycles/client/java/spring/
+│       ├── annotation/                # @Cycles annotation
+│       ├── aspect/                    # CyclesAspect (AOP interceptor)
+│       ├── autoconfigure/             # Spring Boot auto-configuration
+│       ├── client/                    # CyclesClient interface & HTTP impl
+│       ├── config/                    # CyclesProperties
+│       ├── context/                   # CyclesContextHolder, request builders
+│       ├── evaluation/                # SpEL evaluator, field resolvers
+│       ├── model/                     # Decision, Caps, ErrorCode, exceptions
+│       ├── retry/                     # CommitRetryEngine
+│       └── util/                      # Constants, validation
+└── cycles-demo-client-java-spring/    # Demo application
+```
+
+## Protocol Spec
+
+This starter implements the [Cycles Protocol v0](https://github.com/runcycles/cycles-protocol/blob/main/cycles-protocol-v0.yaml) (v0.1.23).
+
+## License
+
+Apache 2.0
