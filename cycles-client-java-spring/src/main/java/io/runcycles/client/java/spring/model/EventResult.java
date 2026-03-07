@@ -10,9 +10,9 @@ import java.util.Map;
 public class EventResult {
     private final String status;
     private final String eventId;
-    private final List<Map<String, Object>> balances;
+    private final List<Balance> balances;
 
-    private EventResult(String status, String eventId, List<Map<String, Object>> balances) {
+    private EventResult(String status, String eventId, List<Balance> balances) {
         this.status = status;
         this.eventId = eventId;
         this.balances = balances;
@@ -24,13 +24,13 @@ public class EventResult {
         return new EventResult(
                 map.get("status") instanceof String s ? s : null,
                 map.get("event_id") instanceof String s ? s : null,
-                map.get("balances") instanceof List<?> l ? (List<Map<String, Object>>) l : null
+                Balance.listFromRaw(map.get("balances") instanceof List<?> l ? l : null)
         );
     }
 
     public String getStatus() { return status; }
     public String getEventId() { return eventId; }
-    public List<Map<String, Object>> getBalances() { return balances; }
+    public List<Balance> getBalances() { return balances; }
 
     @Override
     public String toString() {

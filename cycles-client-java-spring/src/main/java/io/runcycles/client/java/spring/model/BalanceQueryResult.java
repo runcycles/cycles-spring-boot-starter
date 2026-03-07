@@ -8,11 +8,11 @@ import java.util.Map;
  * Matches server's BalanceResponse: balances[], has_more, next_cursor.
  */
 public class BalanceQueryResult {
-    private final List<Map<String, Object>> balances;
+    private final List<Balance> balances;
     private final Boolean hasMore;
     private final String nextCursor;
 
-    private BalanceQueryResult(List<Map<String, Object>> balances, Boolean hasMore, String nextCursor) {
+    private BalanceQueryResult(List<Balance> balances, Boolean hasMore, String nextCursor) {
         this.balances = balances;
         this.hasMore = hasMore;
         this.nextCursor = nextCursor;
@@ -22,13 +22,13 @@ public class BalanceQueryResult {
     public static BalanceQueryResult fromMap(Map<String, Object> map) {
         if (map == null) return null;
         return new BalanceQueryResult(
-                map.get("balances") instanceof List<?> l ? (List<Map<String, Object>>) l : List.of(),
+                Balance.listFromRaw(map.get("balances") instanceof List<?> l ? l : null),
                 map.get("has_more") instanceof Boolean b ? b : false,
                 map.get("next_cursor") instanceof String s ? s : null
         );
     }
 
-    public List<Map<String, Object>> getBalances() { return balances; }
+    public List<Balance> getBalances() { return balances; }
     public Boolean getHasMore() { return hasMore; }
     public String getNextCursor() { return nextCursor; }
 

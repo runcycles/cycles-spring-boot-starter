@@ -1,7 +1,6 @@
 package io.runcycles.client.java.spring.model;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * Typed result returned by {@code @Cycles(dryRun=true)} annotated methods
@@ -15,14 +14,14 @@ public class DryRunResult {
     private final Caps caps;
     private final List<String> affectedScopes;
     private final String scopePath;
-    private final Map<String, Object> reserved;
-    private final List<Map<String, Object>> balances;
+    private final Amount reserved;
+    private final List<Balance> balances;
     private final Long retryAfterMs;
 
     public DryRunResult(Decision decision, Caps caps,
                         List<String> affectedScopes, String scopePath,
-                        Map<String, Object> reserved,
-                        List<Map<String, Object>> balances,
+                        Amount reserved,
+                        List<Balance> balances,
                         Long retryAfterMs) {
         this.decision = decision;
         this.caps = caps;
@@ -37,8 +36,8 @@ public class DryRunResult {
     public Caps getCaps() { return caps; }
     public List<String> getAffectedScopes() { return affectedScopes; }
     public String getScopePath() { return scopePath; }
-    public Map<String, Object> getReserved() { return reserved; }
-    public List<Map<String, Object>> getBalances() { return balances; }
+    public Amount getReserved() { return reserved; }
+    public List<Balance> getBalances() { return balances; }
     public Long getRetryAfterMs() { return retryAfterMs; }
 
     public boolean isAllowed() { return decision == Decision.ALLOW || decision == Decision.ALLOW_WITH_CAPS; }

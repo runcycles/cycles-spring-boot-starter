@@ -80,35 +80,32 @@ public class CyclesLifecycleService {
             throw buildProtocolException("Failed to create reservation", reservationResponse);
         }
 
-        // Parse reservation response
-        Map<String, Object> resBody = reservationResponse.getBody();
-        String reservationId = reservationResponse.getBodyAttributeAsString("reservation_id");
-        Decision decision = Decision.fromString(reservationResponse.getBodyAttributeAsString("decision"));
-        String reasonCode = reservationResponse.getBodyAttributeAsString("reason_code");
-        Long expiresAtMs = resBody.get("expires_at_ms") instanceof Number n ? n.longValue() : null;
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> capsMap = resBody.get("caps") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
-        Caps caps = Caps.fromMap(capsMap);
-
-        @SuppressWarnings("unchecked")
-        List<String> affectedScopes = resBody.get("affected_scopes") instanceof List<?> l
-                ? (List<String>) l : List.of();
-        String scopePath = resBody.get("scope_path") instanceof String s ? s : null;
-        @SuppressWarnings("unchecked")
-        Map<String, Object> reserved = resBody.get("reserved") instanceof Map<?, ?> m
-                ? (Map<String, Object>) m : null;
-        Long retryAfterMs = resBody.get("retry_after_ms") instanceof Number n ? n.longValue() : null;
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> balances = resBody.get("balances") instanceof List<?> l
-                ? (List<Map<String, Object>>) l : null;
-
+        // Parse reservation response into typed DTO
+        ReservationResult resResult = ReservationResult.fromMap(reservationResponse.getBody());
         long resT2 = System.currentTimeMillis();
+
+        if (resResult == null) {
+            LOG.error("Could not parse reservation response: responseBody={}", reservationResponse.getBody());
+            throw new CyclesProtocolException(
+                    "Failed to parse reservation response",
+                    ErrorCode.INTERNAL_ERROR, null, reservationResponse.getStatus());
+        }
+
+        Decision decision = resResult.getDecision();
+        String reservationId = resResult.getReservationId();
+        String reasonCode = resResult.getReasonCode();
+        Long expiresAtMs = resResult.getExpiresAtMs();
+        Caps caps = resResult.getCaps();
+        List<String> affectedScopes = resResult.getAffectedScopes();
+        String scopePath = resResult.getScopePath();
+        Amount reserved = resResult.getReserved();
+        Long retryAfterMs = resResult.getRetryAfterMs();
+        List<Balance> balances = resResult.getBalances();
 
         // Validate decision field
         if (decision == null) {
             String rawDecision = reservationResponse.getBodyAttributeAsString("decision");
-            LOG.error("Unrecognized decision value from server: decision={}, response={}", rawDecision, resBody);
+            LOG.error("Unrecognized decision value from server: decision={}, response={}", rawDecision, reservationResponse.getBody());
             throw new CyclesProtocolException(
                     "Unrecognized decision value: " + rawDecision,
                     ErrorCode.INTERNAL_ERROR, null, reservationResponse.getStatus());
@@ -135,7 +132,7 @@ public class CyclesLifecycleService {
         // Handle DENY
         if (decision == Decision.DENY) {
             LOG.error("Reservation denied: decision=DENY, reasonCode={}, retryAfterMs={}, response={}",
-                    reasonCode, retryAfterMs, resBody);
+                    reasonCode, retryAfterMs, reservationResponse.getBody());
             throw new CyclesProtocolException(
                     "Reservation denied: " + (reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
                     ErrorCode.fromString(reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
@@ -146,11 +143,11 @@ public class CyclesLifecycleService {
         }
 
         if (decision == Decision.ALLOW_WITH_CAPS) {
-            LOG.warn("Reservation allowed with caps: caps={}, response={}", caps, resBody);
+            LOG.warn("Reservation allowed with caps: caps={}, response={}", caps, reservationResponse.getBody());
         }
 
         if (reservationId == null) {
-            LOG.error("Reservation successful but reservation id missing: responseBody={}", resBody);
+            LOG.error("Reservation successful but reservation id missing: responseBody={}", reservationResponse.getBody());
             throw new CyclesProtocolException("Failed to create reservation because of missing reservation identifier");
         }
 
@@ -212,12 +209,12 @@ public class CyclesLifecycleService {
             LOG.debug("Commit done: elapsedTime={}ms, response={}", (comT2 - comT1), commitResponse);
 
             if (commitResponse.is2xx()) {
-                Map<String, Object> comBody = commitResponse.getBody();
+                CommitResult commitResult = CommitResult.fromMap(commitResponse.getBody());
                 LOG.info("Commit successful: reservationId={}, status={}, charged={}, released={}",
                         reservationId,
-                        comBody != null ? comBody.get("status") : null,
-                        comBody != null ? comBody.get("charged") : null,
-                        comBody != null ? comBody.get("released") : null);
+                        commitResult != null ? commitResult.getStatus() : null,
+                        commitResult != null ? commitResult.getCharged() : null,
+                        commitResult != null ? commitResult.getReleased() : null);
             } else {
                 LOG.error("Commit failed: reservationId={}, reason={}, responseBody={}",
                         reservationId, commitResponse.getErrorMessage(), commitResponse.getBody());
@@ -277,9 +274,8 @@ public class CyclesLifecycleService {
                 Map<String, Object> extendBody = requestBuilderService.buildExtend(ttlMs, null);
                 CyclesResponse<Map<String, Object>> extendResponse = client.extendReservation(reservationId, extendBody);
                 if (extendResponse.is2xx()) {
-                    Map<String, Object> extBody = extendResponse.getBody();
-                    Long newExpiresAtMs = extBody != null && extBody.get("expires_at_ms") instanceof Number n
-                            ? n.longValue() : null;
+                    ExtendResult extResult = ExtendResult.fromMap(extendResponse.getBody());
+                    Long newExpiresAtMs = extResult != null ? extResult.getExpiresAtMs() : null;
                     if (newExpiresAtMs != null) {
                         ctx.updateExpiresAtMs(newExpiresAtMs);
                     }

@@ -11,10 +11,10 @@ public class ReservationDetailResult {
     private final String reservationId;
     private final String status;
     private final String idempotencyKey;
-    private final Map<String, Object> subject;
-    private final Map<String, Object> action;
-    private final Map<String, Object> reserved;
-    private final Map<String, Object> committed;
+    private final Subject subject;
+    private final Action action;
+    private final Amount reserved;
+    private final Amount committed;
     private final Long createdAtMs;
     private final Long expiresAtMs;
     private final Long finalizedAtMs;
@@ -23,8 +23,8 @@ public class ReservationDetailResult {
     private final Map<String, Object> metadata;
 
     private ReservationDetailResult(String reservationId, String status, String idempotencyKey,
-                                    Map<String, Object> subject, Map<String, Object> action,
-                                    Map<String, Object> reserved, Map<String, Object> committed,
+                                    Subject subject, Action action,
+                                    Amount reserved, Amount committed,
                                     Long createdAtMs, Long expiresAtMs, Long finalizedAtMs,
                                     String scopePath, List<String> affectedScopes,
                                     Map<String, Object> metadata) {
@@ -50,10 +50,10 @@ public class ReservationDetailResult {
                 map.get("reservation_id") instanceof String s ? s : null,
                 map.get("status") instanceof String s ? s : null,
                 map.get("idempotency_key") instanceof String s ? s : null,
-                map.get("subject") instanceof Map<?, ?> m ? (Map<String, Object>) m : null,
-                map.get("action") instanceof Map<?, ?> m ? (Map<String, Object>) m : null,
-                map.get("reserved") instanceof Map<?, ?> m ? (Map<String, Object>) m : null,
-                map.get("committed") instanceof Map<?, ?> m ? (Map<String, Object>) m : null,
+                map.get("subject") instanceof Map<?, ?> m ? Subject.fromMap((Map<String, Object>) m) : null,
+                map.get("action") instanceof Map<?, ?> m ? Action.fromMap((Map<String, Object>) m) : null,
+                map.get("reserved") instanceof Map<?, ?> m ? Amount.fromMap((Map<String, Object>) m) : null,
+                map.get("committed") instanceof Map<?, ?> m ? Amount.fromMap((Map<String, Object>) m) : null,
                 map.get("created_at_ms") instanceof Number n ? n.longValue() : null,
                 map.get("expires_at_ms") instanceof Number n ? n.longValue() : null,
                 map.get("finalized_at_ms") instanceof Number n ? n.longValue() : null,
@@ -66,10 +66,10 @@ public class ReservationDetailResult {
     public String getReservationId() { return reservationId; }
     public String getStatus() { return status; }
     public String getIdempotencyKey() { return idempotencyKey; }
-    public Map<String, Object> getSubject() { return subject; }
-    public Map<String, Object> getAction() { return action; }
-    public Map<String, Object> getReserved() { return reserved; }
-    public Map<String, Object> getCommitted() { return committed; }
+    public Subject getSubject() { return subject; }
+    public Action getAction() { return action; }
+    public Amount getReserved() { return reserved; }
+    public Amount getCommitted() { return committed; }
     public Long getCreatedAtMs() { return createdAtMs; }
     public Long getExpiresAtMs() { return expiresAtMs; }
     public Long getFinalizedAtMs() { return finalizedAtMs; }
