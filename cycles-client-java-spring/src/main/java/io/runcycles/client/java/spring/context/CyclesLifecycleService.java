@@ -212,7 +212,12 @@ public class CyclesLifecycleService {
             LOG.debug("Commit done: elapsedTime={}ms, response={}", (comT2 - comT1), commitResponse);
 
             if (commitResponse.is2xx()) {
-                LOG.debug("Commit successful: reservationId={}", reservationId);
+                Map<String, Object> comBody = commitResponse.getBody();
+                LOG.info("Commit successful: reservationId={}, status={}, charged={}, released={}",
+                        reservationId,
+                        comBody != null ? comBody.get("status") : null,
+                        comBody != null ? comBody.get("charged") : null,
+                        comBody != null ? comBody.get("released") : null);
             } else {
                 LOG.error("Commit failed: reservationId={}, reason={}, responseBody={}",
                         reservationId, commitResponse.getErrorMessage(), commitResponse.getBody());
