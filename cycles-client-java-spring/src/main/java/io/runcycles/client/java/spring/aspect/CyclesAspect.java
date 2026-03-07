@@ -61,8 +61,16 @@ public class CyclesAspect {
 
         Method method = ((MethodSignature) pjp.getSignature()).getMethod();
 
+        // Resolve actionKind/actionName: annotation value or derive from class/method
+        String actionKind = cycles.actionKind().isBlank()
+                ? pjp.getTarget().getClass().getSimpleName()
+                : cycles.actionKind();
+        String actionName = cycles.actionName().isBlank()
+                ? method.getName()
+                : cycles.actionName();
+
         long estimate = evaluator.evaluate(
-                cycles.estimateExpression(),
+                cycles.value(),
                 method,
                 pjp.getArgs(),
                 null,
@@ -70,7 +78,8 @@ public class CyclesAspect {
         );
         LOG.info("Estimated usage: estimate={}", estimate);
 
-        Map<String, Object> createBody = cyclesRequestBuilderService.buildReservation(cycles, estimate, null);
+        Map<String, Object> createBody = cyclesRequestBuilderService.buildReservation(
+                cycles, estimate, actionKind, actionName, null);
 
         LOG.info("Creating reservation: createBody={}", createBody);
         long resT1 = System.currentTimeMillis();
@@ -153,17 +162,17 @@ public class CyclesAspect {
             long methodElapsed = System.currentTimeMillis() - resT2;
             LOG.info("Annotated method finished: reservationId={}, methodElapsedMs={}", reservationId, methodElapsed);
 
-            long actual;
-            if (!cycles.actualExpression().isBlank()) {
-                actual = evaluator.evaluate(
-                        cycles.actualExpression(),
+            long actualAmount;
+            if (!cycles.actual().isBlank()) {
+                actualAmount = evaluator.evaluate(
+                        cycles.actual(),
                         method,
                         pjp.getArgs(),
                         result,
                         pjp.getTarget()
                 );
-            } else if (cycles.useEstimatedIfActualNotProvided()) {
-                actual = estimate;
+            } else if (cycles.useEstimateIfActualNotProvided()) {
+                actualAmount = estimate;
             } else {
                 LOG.error("Actual usage amount is missing that is required");
                 throw new IllegalStateException("Actual expression required");
@@ -181,7 +190,7 @@ public class CyclesAspect {
             Map<String, Object> commitMetadata = ctx.getCommitMetadata();
 
             Map<String, Object> commitBody = cyclesRequestBuilderService.buildCommit(
-                    cycles, actual, metrics, commitMetadata);
+                    cycles, actualAmount, metrics, commitMetadata);
 
             try {
                 LOG.info("Committing reservation: reservationId={}, commitBody={}", reservationId, commitBody);

@@ -7,21 +7,33 @@ import java.lang.annotation.*;
 @Documented
 public @interface Cycles {
 
+    /**
+     * SpEL expression for estimated cost. This is the only required field.
+     * Enables shorthand: {@code @Cycles("#tokens * 10")}
+     */
+    String value();
+
     String tenant() default "";
     String workspace() default "";
     String app() default "";
     String workflow() default "";
-    String agent () default "";
-    String toolset () default "";
+    String agent() default "";
+    String toolset() default "";
 
-    String actionKind();
-    String actionName();
+    /** Action category. Defaults to declaring class simple name if blank. */
+    String actionKind() default "";
+    /** Action identifier. Defaults to method name if blank. */
+    String actionName() default "";
     String[] actionTags() default {};
 
-    String estimateExpression();
-    String actualExpression() default "";
+    /** SpEL expression for actual cost (evaluated after method returns). */
+    String actual() default "";
 
-    boolean useEstimatedIfActualNotProvided() default false;
+    /**
+     * When true and {@code actual} is blank, use the estimate as actual.
+     * Defaults to true so that the minimal {@code @Cycles("1000")} works.
+     */
+    boolean useEstimateIfActualNotProvided() default true;
 
     String unit() default "USD_MICROCENTS";
     long ttlMs() default 60000;

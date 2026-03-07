@@ -37,14 +37,9 @@ cycles:
 @Service
 public class LlmService {
 
-    @Cycles(
-            actionKind = "llm.completion",
-            actionName = "gpt-4",
-            estimateExpression = "#p1 * 10",
-            actualExpression = "#result.length() * 5"
-    )
+    // Minimal — just the estimate expression
+    @Cycles("#tokens * 10")
     public String generateText(String prompt, int tokens) {
-        // Your LLM call here
         return callProvider(prompt, tokens);
     }
 }
@@ -53,8 +48,18 @@ public class LlmService {
 That's it. The aspect will automatically:
 1. **Reserve** budget before the method runs (using the estimated amount)
 2. **Execute** your method if the reservation is allowed
-3. **Commit** the actual usage after the method completes
+3. **Commit** the actual usage after the method completes (defaults to estimated amount)
 4. **Release** the reservation if the method throws an exception
+
+Action is auto-derived: `actionKind` = class name (`LlmService`), `actionName` = method name (`generateText`). Override when you need explicit control:
+
+```java
+@Cycles(value = "#tokens * 10",
+        actionKind = "llm.completion",
+        actionName = "gpt-4",
+        actual = "#result.length() * 5")
+public String generateText(String prompt, int tokens) { ... }
+```
 
 ## How It Works
 
@@ -64,7 +69,7 @@ That's it. The aspect will automatically:
 ┌──────────────────────────────────────────────────────────────┐
 │  @Cycles method invocation                                   │
 │                                                              │
-│  1. Evaluate estimateExpression → Amount(unit, amount)       │
+│  1. Evaluate estimate expression → Amount(unit, amount)      │
 │  2. POST /v1/reservations                                    │
 │     ├─ 409 (BUDGET_EXCEEDED / OVERDRAFT / DEBT)              │
 │     │   → throw CyclesProtocolException (method never runs)  │
@@ -72,7 +77,7 @@ That's it. The aspect will automatically:
 │     └─ 200 ALLOW_WITH_CAPS → Caps available via context      │
 │  3. Start heartbeat (POST .../extend at ttlMs/2 intervals)  │
 │  4. Execute the guarded method                               │
-│     ├─ Success → evaluate actualExpression                   │
+│     ├─ Success → evaluate actual expression                  │
 │     │            POST /v1/reservations/{id}/commit            │
 │     │            (retries on transient failure)               │
 │     └─ Failure → POST /v1/reservations/{id}/release          │
@@ -130,12 +135,12 @@ cycles:
 
 | Parameter | Required | Default | Description |
 |---|---|---|---|
-| `actionKind` | Yes | — | Action category (e.g., `llm.completion`, `tool.search`) |
-| `actionName` | Yes | — | Action identifier (e.g., `gpt-4`, `web.search`) |
-| `estimateExpression` | Yes | — | SpEL expression for estimated cost |
-| `actualExpression` | No | `""` | SpEL expression for actual cost (evaluated after method returns) |
+| `value` | Yes | — | SpEL expression for estimated cost (enables `@Cycles("1000")` shorthand) |
+| `actionKind` | No | class name | Action category (e.g., `llm.completion`, `tool.search`) |
+| `actionName` | No | method name | Action identifier (e.g., `gpt-4`, `web.search`) |
+| `actual` | No | `""` | SpEL expression for actual cost (evaluated after method returns) |
 | `actionTags` | No | `{}` | Policy tags (e.g., `{"prod", "customer-facing"}`) |
-| `useEstimatedIfActualNotProvided` | No | `false` | Use estimate as actual when `actualExpression` is blank |
+| `useEstimateIfActualNotProvided` | No | `true` | Use estimate as actual when `actual` is blank |
 | `unit` | No | `USD_MICROCENTS` | Cost unit: `USD_MICROCENTS`, `TOKENS`, `CREDITS`, `RISK_POINTS` |
 | `ttlMs` | No | `60000` | Reservation TTL in milliseconds (1,000–86,400,000) |
 | `gracePeriodMs` | No | `-1` (server default) | Grace period for late commits (0–60,000 ms, server default: 5,000) |
@@ -157,23 +162,20 @@ Estimate and actual expressions are evaluated as SpEL with these variables avail
 |---|---|
 | `#p0`, `#p1`, ... | Method parameters by index |
 | `#paramName` | Method parameters by name (requires `-parameters` compiler flag) |
-| `#result` | Method return value (only available in `actualExpression`) |
+| `#result` | Method return value (only available in `actual`) |
 | `#args` | All method arguments as an array |
 | `#target` | The target object (the bean instance) |
 
 Examples:
 ```java
-// Estimate based on requested token count (2nd parameter)
-estimateExpression = "#p1 * 10"
+// Minimal — fixed estimate, estimate used as actual
+@Cycles("1000")
 
-// Actual based on response length
-actualExpression = "#result.length() * 5"
+// Estimate from parameter
+@Cycles("#tokens * 10")
 
-// Fixed estimate
-estimateExpression = "1000"
-
-// Use estimated as actual (no actualExpression needed)
-useEstimatedIfActualNotProvided = true
+// With explicit actual
+@Cycles(value = "#p1 * 10", actual = "#result.length() * 5")
 ```
 
 ## Accessing Caps in Your Method
@@ -181,12 +183,10 @@ useEstimatedIfActualNotProvided = true
 When the server returns `ALLOW_WITH_CAPS`, you can read the constraints inside your guarded method:
 
 ```java
-@Cycles(
+@Cycles(value = "#tokens * 10",
+        actual = "#result.length() * 5",
         actionKind = "llm.completion",
-        actionName = "gpt-4",
-        estimateExpression = "#tokens * 10",
-        actualExpression = "#result.length() * 5"
-)
+        actionName = "gpt-4")
 public String generate(String prompt, int tokens) {
     CyclesReservationContext ctx = CyclesContextHolder.get();
 
@@ -254,7 +254,7 @@ Error codes from the protocol:
 
 Subject fields (`tenant`, `workspace`, `app`, `workflow`, `agent`, `toolset`) are resolved in order:
 
-1. **Annotation value** — `@Cycles(tenant = "my-tenant")`
+1. **Annotation value** — `@Cycles(value = "1000", tenant = "my-tenant")`
 2. **Configuration** — `cycles.tenant=my-tenant` in `application.yml`
 3. **Dynamic resolver** — a Spring bean implementing `CyclesFieldResolver`
 
@@ -301,12 +301,7 @@ cycles:
 Use `dryRun = true` to evaluate a reservation without persisting it or locking budget. The guarded method will **not** execute — the aspect returns `null` immediately after the server responds.
 
 ```java
-@Cycles(
-        actionKind = "llm.completion",
-        actionName = "gpt-4",
-        estimateExpression = "#tokens * 10",
-        dryRun = true
-)
+@Cycles(value = "#tokens * 10", dryRun = true)
 public String checkBudget(String prompt, int tokens) {
     // This method body never executes in dry_run mode.
     // The aspect returns null after the server evaluates.
@@ -321,12 +316,10 @@ The dry-run response includes `decision`, `caps`, and `affected_scopes` in the s
 The starter automatically includes `latency_ms` (method execution time) in every commit. You can also set additional metrics inside your guarded method:
 
 ```java
-@Cycles(
+@Cycles(value = "#tokens * 10",
+        actual = "#result.length() * 5",
         actionKind = "llm.completion",
-        actionName = "gpt-4",
-        estimateExpression = "#tokens * 10",
-        actualExpression = "#result.length() * 5"
-)
+        actionName = "gpt-4")
 public String generate(String prompt, int tokens) {
     CyclesReservationContext ctx = CyclesContextHolder.get();
 
@@ -362,13 +355,8 @@ public String process(String input) {
 Attach custom dimensions to the Subject for enterprise taxonomies:
 
 ```java
-@Cycles(
-        actionKind = "llm.completion",
-        actionName = "gpt-4",
-        estimateExpression = "1000",
-        useEstimatedIfActualNotProvided = true,
-        dimensions = {"cost_center=engineering", "project=alpha"}
-)
+@Cycles(value = "1000",
+        dimensions = {"cost_center=engineering", "project=alpha"})
 public String generate(String prompt) { ... }
 ```
 

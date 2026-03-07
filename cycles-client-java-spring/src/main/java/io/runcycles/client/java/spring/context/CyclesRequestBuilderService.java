@@ -18,14 +18,15 @@ public class CyclesRequestBuilderService {
     }
 
     public Map<String, Object> buildReservation(Cycles cycles, long estimatedAmount,
+                                                 String actionKind, String actionName,
                                                  Map<String, Object> metadata) {
         Objects.requireNonNull(cycles, "Cycles annotation must not be null");
 
         Map<String, String> resolvedFields = resolveSubjectFields(cycles);
-        validateReservationMandatory(cycles, resolvedFields, estimatedAmount);
+        validateMandatory(resolvedFields, actionKind, actionName, estimatedAmount, cycles.unit());
 
         Map<String, Object> subject = buildSubject(resolvedFields, cycles.dimensions());
-        Map<String, Object> action = buildAction(cycles);
+        Map<String, Object> action = buildAction(actionKind, actionName, cycles.actionTags());
         Map<String, Object> estimate = buildEstimate(cycles, estimatedAmount);
 
         Map<String, Object> body = new HashMap<>();
@@ -94,14 +95,15 @@ public class CyclesRequestBuilderService {
     }
 
     public Map<String, Object> buildDecision(Cycles cycles, long estimatedAmount,
+                                              String actionKind, String actionName,
                                               Map<String, Object> metadata) {
         Objects.requireNonNull(cycles, "Cycles annotation must not be null");
 
         Map<String, String> resolvedFields = resolveSubjectFields(cycles);
-        validateReservationMandatory(cycles, resolvedFields, estimatedAmount);
+        validateMandatory(resolvedFields, actionKind, actionName, estimatedAmount, cycles.unit());
 
         Map<String, Object> subject = buildSubject(resolvedFields, cycles.dimensions());
-        Map<String, Object> action = buildAction(cycles);
+        Map<String, Object> action = buildAction(actionKind, actionName, cycles.actionTags());
         Map<String, Object> estimate = buildEstimate(cycles, estimatedAmount);
 
         Map<String, Object> body = new HashMap<>();
@@ -118,15 +120,16 @@ public class CyclesRequestBuilderService {
     }
 
     public Map<String, Object> buildEvent(Cycles cycles, long actualAmount,
+                                           String actionKind, String actionName,
                                            CyclesMetrics metrics, Long clientTimeMs,
                                            Map<String, Object> metadata) {
         Objects.requireNonNull(cycles, "Cycles annotation must not be null");
 
         Map<String, String> resolvedFields = resolveSubjectFields(cycles);
-        validateReservationMandatory(cycles, resolvedFields, actualAmount);
+        validateMandatory(resolvedFields, actionKind, actionName, actualAmount, cycles.unit());
 
         Map<String, Object> subject = buildSubject(resolvedFields, cycles.dimensions());
-        Map<String, Object> action = buildAction(cycles);
+        Map<String, Object> action = buildAction(actionKind, actionName, cycles.actionTags());
 
         Map<String, Object> body = new HashMap<>();
         body.put(Constants.IDEMPOTENCY_KEY, UUID.randomUUID().toString());
@@ -180,12 +183,12 @@ public class CyclesRequestBuilderService {
     // -------------------------
     // Action
     // -------------------------
-    private Map<String, Object> buildAction(Cycles c) {
+    private Map<String, Object> buildAction(String actionKind, String actionName, String[] actionTags) {
         Map<String, Object> action = new HashMap<>();
-        ValidationUtils.putIfNotBlank(action, "kind", c.actionKind());
-        ValidationUtils.putIfNotBlank(action, "name", c.actionName());
-        if (c.actionTags().length > 0) {
-            action.put("tags", List.of(c.actionTags()));
+        ValidationUtils.putIfNotBlank(action, "kind", actionKind);
+        ValidationUtils.putIfNotBlank(action, "name", actionName);
+        if (actionTags.length > 0) {
+            action.put("tags", List.of(actionTags));
         }
         return action;
     }
@@ -235,19 +238,20 @@ public class CyclesRequestBuilderService {
     // -------------------------
     // Validation
     // -------------------------
-    private void validateReservationMandatory(Cycles c, Map<String, String> resolvedFields, long amount) {
-        // Spec: Subject requires at least one standard field (anyOf: tenant, workspace, app, workflow, agent, toolset)
+    private void validateMandatory(Map<String, String> resolvedFields,
+                                   String actionKind, String actionName,
+                                   long amount, String unit) {
         boolean hasAnySubjectField = resolvedFields.entrySet().stream()
                 .anyMatch(e -> e.getValue() != null && !e.getValue().isBlank());
         if (!hasAnySubjectField) {
             throw new CyclesProtocolException(
                     "At least one Subject field (tenant, workspace, app, workflow, agent, or toolset) is required");
         }
-        ValidationUtils.requireNotBlank(c.actionKind(), "actionKind is mandatory");
-        ValidationUtils.requireNotBlank(c.actionName(), "actionName is mandatory");
+        ValidationUtils.requireNotBlank(actionKind, "actionKind is mandatory");
+        ValidationUtils.requireNotBlank(actionName, "actionName is mandatory");
         if (amount < 0) {
             throw new CyclesProtocolException("Amount must be >= 0");
         }
-        ValidationUtils.requireNotBlank(c.unit(), "unit is mandatory");
+        ValidationUtils.requireNotBlank(unit, "unit is mandatory");
     }
 }
