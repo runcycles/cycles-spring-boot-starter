@@ -61,31 +61,37 @@ That's it. The aspect will automatically:
 ### The Reserve / Commit / Release Lifecycle
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  @Cycles method invocation                              │
-│                                                         │
-│  1. Evaluate estimateExpression                         │
-│  2. POST /v1/reservations  ──→  ALLOW / DENY            │
-│     ├─ DENY  → throw CyclesProtocolException            │
-│     └─ ALLOW → continue                                 │
-│  3. Execute the guarded method                          │
-│     ├─ Success → evaluate actualExpression              │
-│     │            POST /v1/reservations/{id}/commit       │
-│     └─ Failure → POST /v1/reservations/{id}/release     │
-│  4. Heartbeat extends TTL for long-running methods      │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  @Cycles method invocation                                   │
+│                                                              │
+│  1. Evaluate estimateExpression → Amount(unit, amount)       │
+│  2. POST /v1/reservations                                    │
+│     ├─ 409 (BUDGET_EXCEEDED / OVERDRAFT / DEBT)              │
+│     │   → throw CyclesProtocolException (method never runs)  │
+│     ├─ 200 ALLOW → reservation created, continue             │
+│     └─ 200 ALLOW_WITH_CAPS → Caps available via context      │
+│  3. Start heartbeat (POST .../extend at ttlMs/2 intervals)  │
+│  4. Execute the guarded method                               │
+│     ├─ Success → evaluate actualExpression                   │
+│     │            POST /v1/reservations/{id}/commit            │
+│     │            (retries on transient failure)               │
+│     └─ Failure → POST /v1/reservations/{id}/release          │
+│  5. Cancel heartbeat, clear CyclesContextHolder              │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Decisions
 
 The Cycles server returns one of three decisions on reservation:
 
-| Decision | Meaning |
-|---|---|
-| `ALLOW` | Budget available, reservation created |
-| `ALLOW_WITH_CAPS` | Budget available with constraints (e.g., reduced token limits) |
-| `DENY` | Insufficient budget, method will not execute |
+| Decision | HTTP | Meaning |
+|---|---|---|
+| `ALLOW` | 200 | Budget available, reservation created |
+| `ALLOW_WITH_CAPS` | 200 | Budget available with soft constraints (e.g., reduced token limits) |
+| `DENY` | 409 | Insufficient budget — expressed as an HTTP 409 error with an `ErrorCode` |
+
+Per the spec, budget denials for non-dry-run reservations are expressed as HTTP 409 responses (not a 200 with `decision=DENY`). The starter throws a `CyclesProtocolException` for all non-2xx responses.
 
 When `ALLOW_WITH_CAPS` is returned, the `Caps` object is available via `CyclesContextHolder` inside your method (see [Accessing Caps](#accessing-caps-in-your-method)).
 
@@ -134,6 +140,8 @@ cycles:
 | `ttlMs` | No | `60000` | Reservation TTL in milliseconds (1,000–86,400,000) |
 | `gracePeriodMs` | No | `-1` (server default) | Grace period for late commits (0–60,000 ms, server default: 5,000) |
 | `overagePolicy` | No | `REJECT` | `REJECT`, `ALLOW_IF_AVAILABLE`, or `ALLOW_WITH_OVERDRAFT` |
+| `dryRun` | No | `false` | Shadow-mode: server evaluates without persisting; method does NOT execute |
+| `dimensions` | No | `{}` | Custom Subject dimensions as `"key=value"` pairs |
 | `tenant` | No | `""` | Override tenant (falls back to config, then resolver) |
 | `workspace` | No | `""` | Override workspace |
 | `app` | No | `""` | Override app |
@@ -229,16 +237,17 @@ Error codes from the protocol:
 
 | ErrorCode | HTTP | Meaning |
 |---|---|---|
-| `BUDGET_EXCEEDED` | 409 | Insufficient budget |
-| `OVERDRAFT_LIMIT_EXCEEDED` | 409 | Debt exceeds overdraft limit |
-| `DEBT_OUTSTANDING` | 409 | Outstanding debt blocks new reservations |
-| `RESERVATION_EXPIRED` | 410 | Reservation TTL + grace period elapsed |
-| `RESERVATION_FINALIZED` | 409 | Already committed or released |
-| `UNIT_MISMATCH` | 400 | Commit unit differs from reservation unit |
-| `IDEMPOTENCY_MISMATCH` | 409 | Same idempotency key, different payload |
-| `UNAUTHORIZED` | 401 | Invalid or missing API key |
-| `FORBIDDEN` | 403 | Tenant mismatch |
+| `INVALID_REQUEST` | 400 | Malformed request (missing required fields, invalid values) |
+| `UNAUTHORIZED` | 403 | Invalid or missing API key |
+| `FORBIDDEN` | 403 | Tenant mismatch (subject.tenant vs effective tenant) |
 | `NOT_FOUND` | 404 | Reservation does not exist |
+| `BUDGET_EXCEEDED` | 409 | Insufficient budget for reservation or commit |
+| `OVERDRAFT_LIMIT_EXCEEDED` | 409 | Debt exceeds overdraft limit, or scope is over-limit |
+| `DEBT_OUTSTANDING` | 409 | Outstanding debt blocks new reservations |
+| `RESERVATION_FINALIZED` | 409 | Reservation already committed or released |
+| `IDEMPOTENCY_MISMATCH` | 409 | Same idempotency key with different payload |
+| `UNIT_MISMATCH` | 400 | Commit unit differs from reservation unit |
+| `RESERVATION_EXPIRED` | 410 | Reservation TTL + grace period elapsed |
 | `INTERNAL_ERROR` | 500 | Server error |
 
 ## Subject Field Resolution
@@ -287,6 +296,110 @@ cycles:
     max-delay: 30s           # default: 30s
 ```
 
+## Dry Run (Shadow Mode)
+
+Use `dryRun = true` to evaluate a reservation without persisting it or locking budget. The guarded method will **not** execute — the aspect returns `null` immediately after the server responds.
+
+```java
+@Cycles(
+        actionKind = "llm.completion",
+        actionName = "gpt-4",
+        estimateExpression = "#tokens * 10",
+        dryRun = true
+)
+public String checkBudget(String prompt, int tokens) {
+    // This method body never executes in dry_run mode.
+    // The aspect returns null after the server evaluates.
+    return callLlm(prompt, tokens);
+}
+```
+
+The dry-run response includes `decision`, `caps`, and `affected_scopes` in the server response. If the server returns `decision=DENY`, a `CyclesProtocolException` is thrown (consistent with non-dry-run behavior), allowing callers to use dry-run as a programmatic budget availability check. If the decision is `ALLOW` or `ALLOW_WITH_CAPS`, the aspect returns `null` and the method does not execute.
+
+## Metrics on Commit
+
+The starter automatically includes `latency_ms` (method execution time) in every commit. You can also set additional metrics inside your guarded method:
+
+```java
+@Cycles(
+        actionKind = "llm.completion",
+        actionName = "gpt-4",
+        estimateExpression = "#tokens * 10",
+        actualExpression = "#result.length() * 5"
+)
+public String generate(String prompt, int tokens) {
+    CyclesReservationContext ctx = CyclesContextHolder.get();
+
+    LlmResponse response = callLlm(prompt, tokens);
+
+    // Report token counts and model version
+    CyclesMetrics metrics = new CyclesMetrics();
+    metrics.setTokensInput(response.getInputTokens());
+    metrics.setTokensOutput(response.getOutputTokens());
+    metrics.setModelVersion(response.getModelVersion());
+    metrics.putCustom("cache_hit", response.isCacheHit());
+    ctx.setMetrics(metrics);
+
+    return response.getText();
+}
+```
+
+## Metadata on Commit
+
+Attach arbitrary key-value metadata to the commit request for audit/debugging:
+
+```java
+@Cycles(...)
+public String process(String input) {
+    CyclesReservationContext ctx = CyclesContextHolder.get();
+    ctx.setCommitMetadata(Map.of("source", "batch-job", "batch_id", batchId));
+    return doWork(input);
+}
+```
+
+## Custom Dimensions
+
+Attach custom dimensions to the Subject for enterprise taxonomies:
+
+```java
+@Cycles(
+        actionKind = "llm.completion",
+        actionName = "gpt-4",
+        estimateExpression = "1000",
+        useEstimatedIfActualNotProvided = true,
+        dimensions = {"cost_center=engineering", "project=alpha"}
+)
+public String generate(String prompt) { ... }
+```
+
+## Optional Endpoints (Programmatic Use)
+
+The `CyclesClient` interface exposes all optional protocol endpoints for programmatic use:
+
+```java
+@Autowired
+private CyclesClient cyclesClient;
+
+// Preflight decision check (no reservation created)
+CyclesResponse<Map<String,Object>> decision = cyclesClient.decide(decideBody);
+
+// List reservations with filters
+CyclesResponse<Map<String,Object>> list = cyclesClient.listReservations(
+        Map.of("status", "ACTIVE", "app", "my-app"));
+
+// Get reservation detail
+CyclesResponse<Map<String,Object>> detail = cyclesClient.getReservation(reservationId);
+
+// Query balances
+CyclesResponse<Map<String,Object>> balances = cyclesClient.getBalances(
+        Map.of("tenant", "my-tenant", "workspace", "production"));
+
+// Post-only accounting event (no reservation)
+CyclesResponse<Map<String,Object>> event = cyclesClient.createEvent(eventBody);
+```
+
+Use `CyclesRequestBuilderService` to build request bodies for `decide` and `event` endpoints.
+
 ## Customization
 
 All beans are created with `@ConditionalOnMissingBean`, so you can override any component:
@@ -333,9 +446,26 @@ cycles-spring-boot-starter/
 └── cycles-demo-client-java-spring/    # Demo application
 ```
 
-## Protocol Spec
+## Protocol Spec Coverage
 
 This starter implements the [Cycles Protocol v0](https://github.com/runcycles/cycles-protocol/blob/main/cycles-protocol-v0.yaml) (v0.1.23).
+
+| Feature | Status | Notes |
+|---|---|---|
+| `POST /v1/reservations` (create) | Implemented | Core — via `@Cycles` annotation and `CyclesClient` |
+| `POST /v1/reservations/{id}/commit` | Implemented | Core — automatic after guarded method returns |
+| `POST /v1/reservations/{id}/release` | Implemented | Core — automatic on method failure |
+| `POST /v1/reservations/{id}/extend` | Implemented | Core — automatic heartbeat |
+| `POST /v1/decide` | Implemented | Programmatic via `CyclesClient.decide()` |
+| `GET /v1/reservations` | Implemented | Programmatic via `CyclesClient.listReservations()` |
+| `GET /v1/reservations/{id}` | Implemented | Programmatic via `CyclesClient.getReservation()` |
+| `GET /v1/balances` | Implemented | Programmatic via `CyclesClient.getBalances()` |
+| `POST /v1/events` | Implemented | Programmatic via `CyclesClient.createEvent()` |
+| `dry_run` on reservation | Implemented | Via `@Cycles(dryRun = true)` — method does not execute |
+| `metrics` on commit | Implemented | Auto `latency_ms`; user sets via `CyclesContextHolder` |
+| `metadata` on requests | Implemented | User sets commit metadata via `CyclesContextHolder` |
+| `X-Idempotency-Key` header | Implemented | Sent automatically on all POST requests |
+| `Subject.dimensions` | Implemented | Via `@Cycles(dimensions = {"key=value"})` |
 
 ## License
 

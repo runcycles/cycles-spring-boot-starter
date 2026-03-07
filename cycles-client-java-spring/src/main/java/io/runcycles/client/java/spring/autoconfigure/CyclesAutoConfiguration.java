@@ -30,6 +30,12 @@ public class CyclesAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(name = "cyclesWebClient")
     public WebClient cyclesWebClient(CyclesProperties props) {
+        if (props.getBaseUrl() == null || props.getBaseUrl().isBlank()) {
+            throw new IllegalStateException("cycles.base-url must be configured");
+        }
+        if (props.getApiKey() == null || props.getApiKey().isBlank()) {
+            throw new IllegalStateException("cycles.api-key must be configured");
+        }
         CyclesProperties.Http httpProps = props.getHttp();
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, (int) httpProps.getConnectTimeout().toMillis())
