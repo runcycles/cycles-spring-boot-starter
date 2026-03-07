@@ -13,9 +13,10 @@ public class CyclesReservationContext {
     private final long estimate;
     private final Decision decision;
     private final Caps caps;
-    private final Long expiresAtMs;
+    private volatile Long expiresAtMs;
     private final List<String> affectedScopes;
     private final String scopePath;
+    private final Map<String, Object> reserved;
     private final List<Map<String, Object>> balances;
 
     // Mutable fields: users can set these during guarded method execution
@@ -26,6 +27,7 @@ public class CyclesReservationContext {
     public CyclesReservationContext(String reservationId, long estimate,
                                    Decision decision, Caps caps, Long expiresAtMs,
                                    List<String> affectedScopes, String scopePath,
+                                   Map<String, Object> reserved,
                                    List<Map<String, Object>> balances) {
         this.reservationId = reservationId;
         this.estimate = estimate;
@@ -34,6 +36,7 @@ public class CyclesReservationContext {
         this.expiresAtMs = expiresAtMs;
         this.affectedScopes = affectedScopes;
         this.scopePath = scopePath;
+        this.reserved = reserved;
         this.balances = balances;
     }
 
@@ -44,7 +47,13 @@ public class CyclesReservationContext {
     public Long getExpiresAtMs() { return expiresAtMs; }
     public List<String> getAffectedScopes() { return affectedScopes; }
     public String getScopePath() { return scopePath; }
+    public Map<String, Object> getReserved() { return reserved; }
     public List<Map<String, Object>> getBalances() { return balances; }
+
+    /**
+     * Update the expiration timestamp after a successful heartbeat extend.
+     */
+    void updateExpiresAtMs(Long expiresAtMs) { this.expiresAtMs = expiresAtMs; }
 
     public boolean hasCaps() { return caps != null; }
     public boolean isExpiringSoon(long thresholdMs) {
