@@ -108,6 +108,14 @@ public class CyclesAspect {
         if (cycles.dryRun()) {
             LOG.info("Dry-run reservation evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
                     (resT2 - resT1), decision, caps, affectedScopes);
+            if (decision == Decision.DENY) {
+                throw new CyclesProtocolException(
+                        "Dry-run denied: " + (reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
+                        ErrorCode.fromString(reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
+                        reasonCode,
+                        reservationResponse.getStatus()
+                );
+            }
             return null;
         }
 
@@ -261,7 +269,11 @@ public class CyclesAspect {
         ErrorCode errorCode = extractErrorCode(response);
         // ErrorResponse uses "error" field (the ErrorCode), not "reason_code" (which is only in 2xx responses)
         String errorField = response.getBodyAttributeAsString("error");
+        String requestId = response.getBodyAttributeAsString("request_id");
         String message = prefix + ": " + (response.getErrorMessage() != null ? response.getErrorMessage() : "unknown error");
+        if (requestId != null) {
+            LOG.error("Server error response: requestId={}, errorCode={}, status={}", requestId, errorField, response.getStatus());
+        }
         return new CyclesProtocolException(message, errorCode, errorField, response.getStatus());
     }
 

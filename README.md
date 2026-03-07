@@ -238,7 +238,7 @@ Error codes from the protocol:
 | ErrorCode | HTTP | Meaning |
 |---|---|---|
 | `INVALID_REQUEST` | 400 | Malformed request (missing required fields, invalid values) |
-| `UNAUTHORIZED` | 401 | Invalid or missing API key |
+| `UNAUTHORIZED` | 403 | Invalid or missing API key |
 | `FORBIDDEN` | 403 | Tenant mismatch (subject.tenant vs effective tenant) |
 | `NOT_FOUND` | 404 | Reservation does not exist |
 | `BUDGET_EXCEEDED` | 409 | Insufficient budget for reservation or commit |
@@ -314,7 +314,7 @@ public String checkBudget(String prompt, int tokens) {
 }
 ```
 
-The dry-run response includes `decision`, `caps`, and `affected_scopes` in the server response. Since the method does not execute, `CyclesContextHolder` is not populated — use the returned value (null) as a signal that the dry-run completed, and inspect server logs for decision details.
+The dry-run response includes `decision`, `caps`, and `affected_scopes` in the server response. If the server returns `decision=DENY`, a `CyclesProtocolException` is thrown (consistent with non-dry-run behavior), allowing callers to use dry-run as a programmatic budget availability check. If the decision is `ALLOW` or `ALLOW_WITH_CAPS`, the aspect returns `null` and the method does not execute.
 
 ## Metrics on Commit
 
