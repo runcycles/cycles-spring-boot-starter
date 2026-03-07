@@ -96,6 +96,10 @@ public class CyclesLifecycleService {
                 ? (List<String>) l : List.of();
         String scopePath = resBody.get("scope_path") instanceof String s ? s : null;
         @SuppressWarnings("unchecked")
+        Map<String, Object> reserved = resBody.get("reserved") instanceof Map<?, ?> m
+                ? (Map<String, Object>) m : null;
+        Long retryAfterMs = resBody.get("retry_after_ms") instanceof Number n ? n.longValue() : null;
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> balances = resBody.get("balances") instanceof List<?> l
                 ? (List<Map<String, Object>>) l : null;
 
@@ -104,17 +108,19 @@ public class CyclesLifecycleService {
         // Handle dry-run
         if (cycles.dryRun()) {
             return handleDryRun(decision, reasonCode, caps, affectedScopes,
-                    reservationResponse.getStatus(), resT2 - resT1);
+                    reservationResponse.getStatus(), retryAfterMs, resT2 - resT1);
         }
 
         // Handle DENY
         if (decision == Decision.DENY) {
-            LOG.error("Reservation denied: decision=DENY, reasonCode={}, response={}", reasonCode, resBody);
+            LOG.error("Reservation denied: decision=DENY, reasonCode={}, retryAfterMs={}, response={}",
+                    reasonCode, retryAfterMs, resBody);
             throw new CyclesProtocolException(
                     "Reservation denied: " + (reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
                     ErrorCode.fromString(reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
                     reasonCode,
-                    reservationResponse.getStatus()
+                    reservationResponse.getStatus(),
+                    retryAfterMs
             );
         }
 
@@ -133,7 +139,7 @@ public class CyclesLifecycleService {
         // Set context and start heartbeat
         CyclesReservationContext ctx = new CyclesReservationContext(
                 reservationId, estimate, decision, caps, expiresAtMs,
-                affectedScopes, scopePath, balances);
+                affectedScopes, scopePath, reserved, balances);
         CyclesContextHolder.set(ctx);
 
         ScheduledFuture<?> heartbeatFuture = scheduleHeartbeat(reservationId, cycles.ttlMs(), expiresAtMs);
@@ -177,7 +183,8 @@ public class CyclesLifecycleService {
     // Dry-run
     // -------------------------
     private Object handleDryRun(Decision decision, String reasonCode, Caps caps,
-                                List<String> affectedScopes, int httpStatus, long elapsedMs) {
+                                List<String> affectedScopes, int httpStatus,
+                                Long retryAfterMs, long elapsedMs) {
         LOG.info("Dry-run reservation evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
                 elapsedMs, decision, caps, affectedScopes);
         if (decision == Decision.DENY) {
@@ -185,7 +192,8 @@ public class CyclesLifecycleService {
                     "Dry-run denied: " + (reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
                     ErrorCode.fromString(reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
                     reasonCode,
-                    httpStatus
+                    httpStatus,
+                    retryAfterMs
             );
         }
         return null;
@@ -262,7 +270,17 @@ public class CyclesLifecycleService {
                 Map<String, Object> extendBody = requestBuilderService.buildExtend(ttlMs, null);
                 CyclesResponse<Map<String, Object>> extendResponse = client.extendReservation(reservationId, extendBody);
                 if (extendResponse.is2xx()) {
-                    LOG.debug("Heartbeat extend successful: reservationId={}", reservationId);
+                    Map<String, Object> extBody = extendResponse.getBody();
+                    Long newExpiresAtMs = extBody != null && extBody.get("expires_at_ms") instanceof Number n
+                            ? n.longValue() : null;
+                    if (newExpiresAtMs != null) {
+                        CyclesReservationContext ctx = CyclesContextHolder.get();
+                        if (ctx != null) {
+                            ctx.updateExpiresAtMs(newExpiresAtMs);
+                        }
+                    }
+                    LOG.debug("Heartbeat extend successful: reservationId={}, newExpiresAtMs={}",
+                            reservationId, newExpiresAtMs);
                 } else {
                     LOG.warn("Heartbeat extend failed: reservationId={}, status={}, error={}",
                             reservationId, extendResponse.getStatus(), extendResponse.getErrorMessage());
