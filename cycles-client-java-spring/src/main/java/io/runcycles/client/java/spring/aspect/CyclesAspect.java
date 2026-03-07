@@ -91,6 +91,17 @@ public class CyclesAspect {
         Map<String, Object> capsMap = resBody.get("caps") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
         Caps caps = Caps.fromMap(capsMap);
 
+        long resT2 = System.currentTimeMillis();
+
+        // dry_run: server evaluates but does not persist — no reservation_id, no commit/release.
+        // Method does NOT execute per spec; no commit/release needed.
+        // Per spec, decision MAY be DENY on dry_run 200 responses, so this must be checked first.
+        if (cycles.dryRun()) {
+            LOG.info("Dry-run reservation evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
+                    (resT2 - resT1), decision, caps, resBody.get("affected_scopes"));
+            return null;
+        }
+
         if (decision == Decision.DENY) {
             LOG.error("Reservation denied: decision=DENY, reasonCode={}, response={}", reasonCode, resBody);
             throw new CyclesProtocolException(
@@ -102,16 +113,6 @@ public class CyclesAspect {
         }
         if (decision == Decision.ALLOW_WITH_CAPS) {
             LOG.warn("Reservation allowed with caps: caps={}, response={}", caps, resBody);
-        }
-
-        long resT2 = System.currentTimeMillis();
-
-        // dry_run: server evaluates but does not persist — no reservation_id, no commit/release.
-        // Method does NOT execute per spec; no commit/release needed.
-        if (cycles.dryRun()) {
-            LOG.info("Dry-run reservation evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
-                    (resT2 - resT1), decision, caps, resBody.get("affected_scopes"));
-            return null;
         }
 
         if (reservationId == null) {
