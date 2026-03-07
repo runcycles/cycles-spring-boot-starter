@@ -1,17 +1,16 @@
 package io.runcycles.client.java.spring.autoconfigure;
 
+import io.netty.channel.ChannelOption;
 import io.runcycles.client.java.spring.aspect.CyclesAspect;
+import io.runcycles.client.java.spring.client.CyclesClient;
+import io.runcycles.client.java.spring.client.DefaultCyclesClient;
 import io.runcycles.client.java.spring.config.CyclesProperties;
 import io.runcycles.client.java.spring.context.CyclesRequestBuilderService;
 import io.runcycles.client.java.spring.evaluation.CyclesExpressionEvaluator;
-
-import io.runcycles.client.java.spring.client.CyclesClient;
-import io.runcycles.client.java.spring.client.DefaultCyclesClient;
 import io.runcycles.client.java.spring.evaluation.CyclesFieldResolver;
 import io.runcycles.client.java.spring.evaluation.CyclesValueResolutionService;
 import io.runcycles.client.java.spring.retry.CommitRetryEngine;
 import io.runcycles.client.java.spring.retry.InMemoryCommitRetryEngine;
-import io.netty.channel.ChannelOption;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -76,7 +75,6 @@ public class CyclesAutoConfiguration {
         return new CyclesRequestBuilderService(resolutionService);
     }
 
-
     @Bean
     @ConditionalOnMissingBean
     public CommitRetryEngine retryEngine(CyclesClient client, CyclesProperties props) {
@@ -89,6 +87,6 @@ public class CyclesAutoConfiguration {
                                CyclesRequestBuilderService cyclesRequestBuilderService,
                                CyclesExpressionEvaluator evaluator,
                                CyclesProperties props) {
-        return new CyclesAspect(client, retryEngine, cyclesRequestBuilderService,evaluator,props);
+        return new CyclesAspect(client, retryEngine, cyclesRequestBuilderService, evaluator, props);
     }
 }

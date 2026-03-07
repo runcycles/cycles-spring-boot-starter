@@ -12,10 +12,11 @@ public class CyclesValueResolutionService {
     private final CyclesProperties properties;
     private final ConcurrentHashMap<String, CyclesFieldResolver> resolverMap;
 
-    public CyclesValueResolutionService (Map<String, CyclesFieldResolver> resolvers,CyclesProperties properties){
+    public CyclesValueResolutionService(Map<String, CyclesFieldResolver> resolvers, CyclesProperties properties) {
         resolverMap = new ConcurrentHashMap<>(resolvers);
         this.properties = properties;
     }
+
     public String resolve(String fieldName, String annotationValue) {
 
         // 1. Annotation override (fast path)
@@ -37,6 +38,7 @@ public class CyclesValueResolutionService {
 
         return resolver.resolve(); // fully dynamic
     }
+
     private String getFromConfig(String fieldName) {
         return switch (fieldName) {
             case Constants.TENANT -> properties.getTenant();
@@ -44,7 +46,7 @@ public class CyclesValueResolutionService {
             case Constants.APP -> properties.getApp();
             case Constants.WORKFLOW -> properties.getWorkflow();
             case Constants.AGENT -> properties.getAgent();
-            case  Constants.TOOLSET -> properties.getToolset();
+            case Constants.TOOLSET -> properties.getToolset();
             default -> null;
         };
     }

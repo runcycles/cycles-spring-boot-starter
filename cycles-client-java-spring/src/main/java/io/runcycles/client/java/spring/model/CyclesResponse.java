@@ -2,7 +2,7 @@ package io.runcycles.client.java.spring.model;
 
 import java.util.Map;
 
-public class CyclesResponse <T>{
+public class CyclesResponse<T> {
     private final int status;
     private final T body;
     private final String errorMessage;
@@ -20,6 +20,7 @@ public class CyclesResponse <T>{
         this.transportError = transportError;
         this.transportException = transportException;
     }
+
     public static <T> CyclesResponse<T> success(int status, T body) {
         return new CyclesResponse<>(status, body, null, false, null);
     }
@@ -32,13 +33,15 @@ public class CyclesResponse <T>{
         String message = ex != null ? ex.getMessage() : "Unknown transport error";
         return new CyclesResponse<>(-1, null, message, true, ex);
     }
-    public String getBodyAttributeAsString(String key){
-        if (key != null && body != null && body instanceof Map<?, ?> map){
+
+    public String getBodyAttributeAsString(String key) {
+        if (key != null && body != null && body instanceof Map<?, ?> map) {
             Object value = map.get(key);
             return value != null ? String.valueOf(value) : null;
         }
         return null;
     }
+
     public boolean is2xx() {
         return status >= 200 && status < 300;
     }

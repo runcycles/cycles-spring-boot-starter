@@ -20,7 +20,7 @@ public class CyclesExpressionEvaluator {
                          Object[] args,
                          Object result,
                          Object target) {
-        LOG.info("Evaluating expression: expression={},method={},args={}, result={}, target={}",expression,method,args,result,target);
+        LOG.debug("Evaluating expression: expression={}, method={}, args={}, result={}, target={}", expression, method, args, result, target);
         Expression exp = parser.parseExpression(expression);
 
         MethodBasedEvaluationContext context =
