@@ -8,10 +8,20 @@ import java.lang.annotation.*;
 public @interface Cycles {
 
     /**
-     * SpEL expression for estimated cost. This is the only required field.
+     * SpEL expression for estimated cost.
      * Enables shorthand: {@code @Cycles("#tokens * 10")}
+     * <p>
+     * Synonym for {@link #estimate()}. Use one or the other, not both.
      */
-    String value();
+    String value() default "";
+
+    /**
+     * SpEL expression for estimated cost (spec-aligned name).
+     * <p>
+     * Synonym for {@link #value()}. Use one or the other, not both.
+     * Example: {@code @Cycles(estimate = "#tokens * 10", actual = "#result.cost")}
+     */
+    String estimate() default "";
 
     String tenant() default "";
     String workspace() default "";

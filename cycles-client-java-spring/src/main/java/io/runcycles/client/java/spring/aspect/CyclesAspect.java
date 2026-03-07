@@ -69,8 +69,11 @@ public class CyclesAspect {
                 ? method.getName()
                 : cycles.actionName();
 
+        // Resolve estimate expression: value() and estimate() are synonyms
+        String estimateExpr = resolveEstimateExpression(cycles);
+
         long estimate = evaluator.evaluate(
-                cycles.value(),
+                estimateExpr,
                 method,
                 pjp.getArgs(),
                 null,
@@ -297,6 +300,18 @@ public class CyclesAspect {
     // -------------------------
     // Helpers
     // -------------------------
+    private String resolveEstimateExpression(Cycles cycles) {
+        boolean hasValue = !cycles.value().isBlank();
+        boolean hasEstimate = !cycles.estimate().isBlank();
+        if (hasValue && hasEstimate) {
+            throw new IllegalStateException("@Cycles: set value or estimate, not both");
+        }
+        if (!hasValue && !hasEstimate) {
+            throw new IllegalStateException("@Cycles: value or estimate is required");
+        }
+        return hasValue ? cycles.value() : cycles.estimate();
+    }
+
     private String extractReservationId(CyclesResponse<Map<String, Object>> response) {
         return response.getBodyAttributeAsString("reservation_id");
     }
