@@ -35,3 +35,8 @@ replay_pid*
 /**/*_dev.*
 /**/temp
 /**/.vscode
+*.prefs
+cycles-client-java-spring/.project
+cycles-demo-client-java-spring/.classpath
+cycles-demo-client-java-spring/.project
+cycles-client-java-spring/.classpath
