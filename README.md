@@ -140,6 +140,8 @@ cycles:
 | `ttlMs` | No | `60000` | Reservation TTL in milliseconds (1,000–86,400,000) |
 | `gracePeriodMs` | No | `-1` (server default) | Grace period for late commits (0–60,000 ms, server default: 5,000) |
 | `overagePolicy` | No | `REJECT` | `REJECT`, `ALLOW_IF_AVAILABLE`, or `ALLOW_WITH_OVERDRAFT` |
+| `dryRun` | No | `false` | Shadow-mode: server evaluates without persisting; method does NOT execute |
+| `dimensions` | No | `{}` | Custom Subject dimensions as `"key=value"` pairs |
 | `tenant` | No | `""` | Override tenant (falls back to config, then resolver) |
 | `workspace` | No | `""` | Override workspace |
 | `app` | No | `""` | Override app |
@@ -294,6 +296,110 @@ cycles:
     max-delay: 30s           # default: 30s
 ```
 
+## Dry Run (Shadow Mode)
+
+Use `dryRun = true` to evaluate a reservation without persisting it or locking budget. The guarded method will **not** execute — the aspect returns `null` immediately after the server responds.
+
+```java
+@Cycles(
+        actionKind = "llm.completion",
+        actionName = "gpt-4",
+        estimateExpression = "#tokens * 10",
+        dryRun = true
+)
+public String checkBudget(String prompt, int tokens) {
+    // This method body never executes in dry_run mode.
+    // The aspect returns null after the server evaluates.
+    return callLlm(prompt, tokens);
+}
+```
+
+The dry-run response includes `decision`, `caps`, and `affected_scopes` — accessible via `CyclesContextHolder` briefly before it's cleared.
+
+## Metrics on Commit
+
+The starter automatically includes `latency_ms` (method execution time) in every commit. You can also set additional metrics inside your guarded method:
+
+```java
+@Cycles(
+        actionKind = "llm.completion",
+        actionName = "gpt-4",
+        estimateExpression = "#tokens * 10",
+        actualExpression = "#result.length() * 5"
+)
+public String generate(String prompt, int tokens) {
+    CyclesReservationContext ctx = CyclesContextHolder.get();
+
+    LlmResponse response = callLlm(prompt, tokens);
+
+    // Report token counts and model version
+    CyclesMetrics metrics = new CyclesMetrics();
+    metrics.setTokensInput(response.getInputTokens());
+    metrics.setTokensOutput(response.getOutputTokens());
+    metrics.setModelVersion(response.getModelVersion());
+    metrics.putCustom("cache_hit", response.isCacheHit());
+    ctx.setMetrics(metrics);
+
+    return response.getText();
+}
+```
+
+## Metadata on Commit
+
+Attach arbitrary key-value metadata to the commit request for audit/debugging:
+
+```java
+@Cycles(...)
+public String process(String input) {
+    CyclesReservationContext ctx = CyclesContextHolder.get();
+    ctx.setCommitMetadata(Map.of("source", "batch-job", "batch_id", batchId));
+    return doWork(input);
+}
+```
+
+## Custom Dimensions
+
+Attach custom dimensions to the Subject for enterprise taxonomies:
+
+```java
+@Cycles(
+        actionKind = "llm.completion",
+        actionName = "gpt-4",
+        estimateExpression = "1000",
+        useEstimatedIfActualNotProvided = true,
+        dimensions = {"cost_center=engineering", "project=alpha"}
+)
+public String generate(String prompt) { ... }
+```
+
+## Optional Endpoints (Programmatic Use)
+
+The `CyclesClient` interface exposes all optional protocol endpoints for programmatic use:
+
+```java
+@Autowired
+private CyclesClient cyclesClient;
+
+// Preflight decision check (no reservation created)
+CyclesResponse<Map<String,Object>> decision = cyclesClient.decide(decideBody);
+
+// List reservations with filters
+CyclesResponse<Map<String,Object>> list = cyclesClient.listReservations(
+        Map.of("status", "ACTIVE", "app", "my-app"));
+
+// Get reservation detail
+CyclesResponse<Map<String,Object>> detail = cyclesClient.getReservation(reservationId);
+
+// Query balances
+CyclesResponse<Map<String,Object>> balances = cyclesClient.getBalances(
+        Map.of("tenant", "my-tenant", "workspace", "production"));
+
+// Post-only accounting event (no reservation)
+CyclesResponse<Map<String,Object>> event = cyclesClient.createEvent(eventBody);
+```
+
+Use `CyclesRequestBuilderService` to build request bodies for `decide` and `event` endpoints.
+
 ## Customization
 
 All beans are created with `@ConditionalOnMissingBean`, so you can override any component:
@@ -344,31 +450,22 @@ cycles-spring-boot-starter/
 
 This starter implements the [Cycles Protocol v0](https://github.com/runcycles/cycles-protocol/blob/main/cycles-protocol-v0.yaml) (v0.1.23).
 
-### Implemented
-
-| Endpoint | Status |
-|---|---|
-| `POST /v1/reservations` (create) | Implemented |
-| `POST /v1/reservations/{id}/commit` | Implemented |
-| `POST /v1/reservations/{id}/release` | Implemented |
-| `POST /v1/reservations/{id}/extend` | Implemented |
-
-### Not Yet Implemented
-
-These are optional or supplementary features defined in the spec but not yet supported by this starter:
-
-| Feature | Spec Reference | Notes |
+| Feature | Status | Notes |
 |---|---|---|
-| `POST /v1/decide` | Optional preflight endpoint | No reservation created; use for soft-landing checks |
-| `GET /v1/reservations` | Optional list/recovery endpoint | For debugging stuck reservations |
-| `GET /v1/reservations/{id}` | Optional detail endpoint | For monitoring long-running operations |
-| `GET /v1/balances` | Optional balance query | Operator visibility |
-| `POST /v1/events` | Optional post-only accounting | For non-estimable actions (no reservation) |
-| `dry_run` on reservation | Shadow-mode evaluation | Evaluates without persisting or locking budget |
-| `metrics` on commit | `StandardMetrics` schema | `tokens_input`, `tokens_output`, `latency_ms`, `model_version` |
-| `metadata` on requests | Optional opaque object | Audit/debugging metadata on reserve, commit, extend |
-| `X-Idempotency-Key` header | Optional header | Body `idempotency_key` is always sent; header is not |
-| `Subject.dimensions` | Optional custom dimensions | Spec says v0 servers MAY ignore; not sent by starter |
+| `POST /v1/reservations` (create) | Implemented | Core — via `@Cycles` annotation and `CyclesClient` |
+| `POST /v1/reservations/{id}/commit` | Implemented | Core — automatic after guarded method returns |
+| `POST /v1/reservations/{id}/release` | Implemented | Core — automatic on method failure |
+| `POST /v1/reservations/{id}/extend` | Implemented | Core — automatic heartbeat |
+| `POST /v1/decide` | Implemented | Programmatic via `CyclesClient.decide()` |
+| `GET /v1/reservations` | Implemented | Programmatic via `CyclesClient.listReservations()` |
+| `GET /v1/reservations/{id}` | Implemented | Programmatic via `CyclesClient.getReservation()` |
+| `GET /v1/balances` | Implemented | Programmatic via `CyclesClient.getBalances()` |
+| `POST /v1/events` | Implemented | Programmatic via `CyclesClient.createEvent()` |
+| `dry_run` on reservation | Implemented | Via `@Cycles(dryRun = true)` — method does not execute |
+| `metrics` on commit | Implemented | Auto `latency_ms`; user sets via `CyclesContextHolder` |
+| `metadata` on requests | Implemented | User sets commit metadata via `CyclesContextHolder` |
+| `X-Idempotency-Key` header | Implemented | Sent automatically on all POST requests |
+| `Subject.dimensions` | Implemented | Via `@Cycles(dimensions = {"key=value"})` |
 
 ## License
 

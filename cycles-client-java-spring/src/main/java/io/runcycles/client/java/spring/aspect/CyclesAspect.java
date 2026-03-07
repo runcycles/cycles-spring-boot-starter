@@ -69,7 +69,7 @@ public class CyclesAspect {
         );
         LOG.info("Estimated usage: estimate={}", estimate);
 
-        Map<String, Object> createBody = cyclesRequestBuilderService.buildReservation(cycles, estimate);
+        Map<String, Object> createBody = cyclesRequestBuilderService.buildReservation(cycles, estimate, null);
 
         LOG.info("Creating reservation: createBody={}", createBody);
         long resT1 = System.currentTimeMillis();
@@ -104,12 +104,28 @@ public class CyclesAspect {
             LOG.warn("Reservation allowed with caps: caps={}, response={}", caps, resBody);
         }
 
+        long resT2 = System.currentTimeMillis();
+
+        // dry_run: server evaluates but does not persist — no reservation_id, no commit/release
+        if (cycles.dryRun()) {
+            LOG.info("Dry-run reservation evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
+                    (resT2 - resT1), decision, caps, resBody.get("affected_scopes"));
+            // Expose context briefly so callers can inspect decision/caps, then clear
+            CyclesReservationContext ctx = new CyclesReservationContext(
+                    null, estimate, decision, caps, null);
+            CyclesContextHolder.set(ctx);
+            try {
+                return null;
+            } finally {
+                CyclesContextHolder.clear();
+            }
+        }
+
         if (reservationId == null) {
             LOG.error("Reservation successful but reservation id missing: responseBody={}", resBody);
             throw new CyclesProtocolException("Failed to create reservation because of missing reservation identifier");
         }
 
-        long resT2 = System.currentTimeMillis();
         LOG.info("Reservation created: elapsedTime={}ms, reservationId={}, decision={}, expiresAtMs={}",
                 (resT2 - resT1), reservationId, decision, expiresAtMs);
 
@@ -122,7 +138,8 @@ public class CyclesAspect {
 
         try {
             Object result = pjp.proceed();
-            LOG.info("Annotated method finished: reservationId={}", reservationId);
+            long methodElapsed = (int) (System.currentTimeMillis() - resT2);
+            LOG.info("Annotated method finished: reservationId={}, methodElapsedMs={}", reservationId, methodElapsed);
 
             long actual;
             if (!cycles.actualExpression().isBlank()) {
@@ -140,7 +157,19 @@ public class CyclesAspect {
                 throw new IllegalStateException("Actual expression required");
             }
 
-            Map<String, Object> commitBody = cyclesRequestBuilderService.buildCommit(cycles, actual);
+            // Pick up metrics and metadata from context (user may have set them during execution)
+            CyclesMetrics metrics = ctx.getMetrics();
+            if (metrics == null) {
+                metrics = new CyclesMetrics();
+            }
+            // Auto-populate latency if not already set
+            if (metrics.getLatencyMs() == null) {
+                metrics.setLatencyMs((int) methodElapsed);
+            }
+            Map<String, Object> commitMetadata = ctx.getCommitMetadata();
+
+            Map<String, Object> commitBody = cyclesRequestBuilderService.buildCommit(
+                    cycles, actual, metrics, commitMetadata);
 
             try {
                 LOG.info("Committing reservation: reservationId={}, commitBody={}", reservationId, commitBody);
@@ -160,7 +189,6 @@ public class CyclesAspect {
                         retryEngine.schedule(reservationId, commitBody);
                     } else if (commitErrorCode == ErrorCode.RESERVATION_FINALIZED
                             || commitErrorCode == ErrorCode.RESERVATION_EXPIRED) {
-                        // Reservation is already in a terminal state — nothing to release
                         LOG.warn("Reservation already finalized/expired, skipping release: reservationId={}, errorCode={}",
                                 reservationId, commitErrorCode);
                     } else if (commitResponse.is4xx()) {
@@ -202,7 +230,7 @@ public class CyclesAspect {
         return heartbeatExecutor.scheduleAtFixedRate(() -> {
             try {
                 LOG.debug("Sending heartbeat extend: reservationId={}", reservationId);
-                Map<String, Object> extendBody = cyclesRequestBuilderService.buildExtend(ttlMs);
+                Map<String, Object> extendBody = cyclesRequestBuilderService.buildExtend(ttlMs, null);
                 CyclesResponse<Map<String, Object>> extendResponse = client.extendReservation(reservationId, extendBody);
                 if (extendResponse.is2xx()) {
                     LOG.debug("Heartbeat extend successful: reservationId={}", reservationId);

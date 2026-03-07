@@ -28,4 +28,16 @@ public @interface Cycles {
     long gracePeriodMs() default -1;
     String overagePolicy() default "REJECT";
 
+    /**
+     * Shadow-mode evaluation. If true, the server evaluates the reservation
+     * without persisting it or locking budget. The guarded method will NOT execute.
+     */
+    boolean dryRun() default false;
+
+    /**
+     * Optional custom dimensions for the Subject, as "key=value" pairs.
+     * Example: {@code dimensions = {"cost_center=engineering", "project=alpha"}}
+     */
+    String[] dimensions() default {};
+
 }
