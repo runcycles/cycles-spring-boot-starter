@@ -18,10 +18,10 @@ public @interface Cycles {
     String actionName();
     String[] actionTags() default {};
 
-    String estimateExpression();
-    String actualExpression() default "";
+    String estimate();
+    String actual() default "";
 
-    boolean useEstimatedIfActualNotProvided() default false;
+    boolean useEstimateIfActualNotProvided() default false;
 
     String unit() default "USD_MICROCENTS";
     long ttlMs() default 60000;

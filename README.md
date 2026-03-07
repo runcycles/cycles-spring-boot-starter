@@ -40,8 +40,8 @@ public class LlmService {
     @Cycles(
             actionKind = "llm.completion",
             actionName = "gpt-4",
-            estimateExpression = "#p1 * 10",
-            actualExpression = "#result.length() * 5"
+            estimate = "#p1 * 10",
+            actual = "#result.length() * 5"
     )
     public String generateText(String prompt, int tokens) {
         // Your LLM call here
@@ -64,7 +64,7 @@ That's it. The aspect will automatically:
 ┌──────────────────────────────────────────────────────────────┐
 │  @Cycles method invocation                                   │
 │                                                              │
-│  1. Evaluate estimateExpression → Amount(unit, amount)       │
+│  1. Evaluate estimate expression → Amount(unit, amount)      │
 │  2. POST /v1/reservations                                    │
 │     ├─ 409 (BUDGET_EXCEEDED / OVERDRAFT / DEBT)              │
 │     │   → throw CyclesProtocolException (method never runs)  │
@@ -72,7 +72,7 @@ That's it. The aspect will automatically:
 │     └─ 200 ALLOW_WITH_CAPS → Caps available via context      │
 │  3. Start heartbeat (POST .../extend at ttlMs/2 intervals)  │
 │  4. Execute the guarded method                               │
-│     ├─ Success → evaluate actualExpression                   │
+│     ├─ Success → evaluate actual expression                  │
 │     │            POST /v1/reservations/{id}/commit            │
 │     │            (retries on transient failure)               │
 │     └─ Failure → POST /v1/reservations/{id}/release          │
@@ -132,10 +132,10 @@ cycles:
 |---|---|---|---|
 | `actionKind` | Yes | — | Action category (e.g., `llm.completion`, `tool.search`) |
 | `actionName` | Yes | — | Action identifier (e.g., `gpt-4`, `web.search`) |
-| `estimateExpression` | Yes | — | SpEL expression for estimated cost |
-| `actualExpression` | No | `""` | SpEL expression for actual cost (evaluated after method returns) |
+| `estimate` | Yes | — | SpEL expression for estimated cost |
+| `actual` | No | `""` | SpEL expression for actual cost (evaluated after method returns) |
 | `actionTags` | No | `{}` | Policy tags (e.g., `{"prod", "customer-facing"}`) |
-| `useEstimatedIfActualNotProvided` | No | `false` | Use estimate as actual when `actualExpression` is blank |
+| `useEstimateIfActualNotProvided` | No | `false` | Use estimate as actual when `actual` is blank |
 | `unit` | No | `USD_MICROCENTS` | Cost unit: `USD_MICROCENTS`, `TOKENS`, `CREDITS`, `RISK_POINTS` |
 | `ttlMs` | No | `60000` | Reservation TTL in milliseconds (1,000–86,400,000) |
 | `gracePeriodMs` | No | `-1` (server default) | Grace period for late commits (0–60,000 ms, server default: 5,000) |
@@ -157,23 +157,23 @@ Estimate and actual expressions are evaluated as SpEL with these variables avail
 |---|---|
 | `#p0`, `#p1`, ... | Method parameters by index |
 | `#paramName` | Method parameters by name (requires `-parameters` compiler flag) |
-| `#result` | Method return value (only available in `actualExpression`) |
+| `#result` | Method return value (only available in `actual`) |
 | `#args` | All method arguments as an array |
 | `#target` | The target object (the bean instance) |
 
 Examples:
 ```java
 // Estimate based on requested token count (2nd parameter)
-estimateExpression = "#p1 * 10"
+estimate = "#p1 * 10"
 
 // Actual based on response length
-actualExpression = "#result.length() * 5"
+actual = "#result.length() * 5"
 
 // Fixed estimate
-estimateExpression = "1000"
+estimate = "1000"
 
-// Use estimated as actual (no actualExpression needed)
-useEstimatedIfActualNotProvided = true
+// Use estimate as actual (no actual expression needed)
+useEstimateIfActualNotProvided = true
 ```
 
 ## Accessing Caps in Your Method
@@ -184,8 +184,8 @@ When the server returns `ALLOW_WITH_CAPS`, you can read the constraints inside y
 @Cycles(
         actionKind = "llm.completion",
         actionName = "gpt-4",
-        estimateExpression = "#tokens * 10",
-        actualExpression = "#result.length() * 5"
+        estimate = "#tokens * 10",
+        actual = "#result.length() * 5"
 )
 public String generate(String prompt, int tokens) {
     CyclesReservationContext ctx = CyclesContextHolder.get();
@@ -304,7 +304,7 @@ Use `dryRun = true` to evaluate a reservation without persisting it or locking b
 @Cycles(
         actionKind = "llm.completion",
         actionName = "gpt-4",
-        estimateExpression = "#tokens * 10",
+        estimate = "#tokens * 10",
         dryRun = true
 )
 public String checkBudget(String prompt, int tokens) {
@@ -324,8 +324,8 @@ The starter automatically includes `latency_ms` (method execution time) in every
 @Cycles(
         actionKind = "llm.completion",
         actionName = "gpt-4",
-        estimateExpression = "#tokens * 10",
-        actualExpression = "#result.length() * 5"
+        estimate = "#tokens * 10",
+        actual = "#result.length() * 5"
 )
 public String generate(String prompt, int tokens) {
     CyclesReservationContext ctx = CyclesContextHolder.get();
@@ -365,8 +365,8 @@ Attach custom dimensions to the Subject for enterprise taxonomies:
 @Cycles(
         actionKind = "llm.completion",
         actionName = "gpt-4",
-        estimateExpression = "1000",
-        useEstimatedIfActualNotProvided = true,
+        estimate = "1000",
+        useEstimateIfActualNotProvided = true,
         dimensions = {"cost_center=engineering", "project=alpha"}
 )
 public String generate(String prompt) { ... }

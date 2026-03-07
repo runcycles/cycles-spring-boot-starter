@@ -62,7 +62,7 @@ public class CyclesAspect {
         Method method = ((MethodSignature) pjp.getSignature()).getMethod();
 
         long estimate = evaluator.evaluate(
-                cycles.estimateExpression(),
+                cycles.estimate(),
                 method,
                 pjp.getArgs(),
                 null,
@@ -154,15 +154,15 @@ public class CyclesAspect {
             LOG.info("Annotated method finished: reservationId={}, methodElapsedMs={}", reservationId, methodElapsed);
 
             long actual;
-            if (!cycles.actualExpression().isBlank()) {
+            if (!cycles.actual().isBlank()) {
                 actual = evaluator.evaluate(
-                        cycles.actualExpression(),
+                        cycles.actual(),
                         method,
                         pjp.getArgs(),
                         result,
                         pjp.getTarget()
                 );
-            } else if (cycles.useEstimatedIfActualNotProvided()) {
+            } else if (cycles.useEstimateIfActualNotProvided()) {
                 actual = estimate;
             } else {
                 LOG.error("Actual usage amount is missing that is required");

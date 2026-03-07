@@ -14,9 +14,9 @@ public class LlmService {
             //workspace = "development",
             //app = "scalerx",
             //workflow = "", agent = "", toolset = "",
-            estimateExpression = "#p1 * 10",
-            actualExpression = "#result.length() * 5",
-            //useEstimatedIfActualNotProvided = false,
+            estimate = "#p1 * 10",
+            actual = "#result.length() * 5",
+            //useEstimateIfActualNotProvided = false,
             actionKind = "llm.completion",
             actionName = "gpt-4"
             //overagePolicy = "ALLOW_WITH_OVERDRAFT",
