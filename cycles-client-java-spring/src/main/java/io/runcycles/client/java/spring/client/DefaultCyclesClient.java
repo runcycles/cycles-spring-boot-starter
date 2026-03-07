@@ -1,12 +1,14 @@
 package io.runcycles.client.java.spring.client;
 
 import io.runcycles.client.java.spring.model.CyclesResponse;
+import io.runcycles.client.java.spring.model.ErrorResponse;
 import io.runcycles.client.java.spring.util.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.lang.reflect.Method;
 import java.util.Map;
 
 public class DefaultCyclesClient implements CyclesClient {
@@ -141,22 +143,36 @@ public class DefaultCyclesClient implements CyclesClient {
                             if (response.statusCode().is2xxSuccessful()) {
                                 return CyclesResponse.success(status, responseBody);
                             }
-                            String error = responseBody.get("message") != null
-                                    ? String.valueOf(responseBody.get("message"))
-                                    : responseBody.get("error") != null
-                                    ? String.valueOf(responseBody.get("error"))
-                                    : null;
-                            return CyclesResponse.httpError(status, error, responseBody);
+                            // Use structured ErrorResponse parsing for consistent error extraction
+                            ErrorResponse errorResponse = ErrorResponse.fromMap(responseBody);
+                            String errorMessage;
+                            if (errorResponse != null && errorResponse.getMessage() != null) {
+                                errorMessage = errorResponse.getMessage();
+                            } else if (responseBody.get("error") != null) {
+                                errorMessage = String.valueOf(responseBody.get("error"));
+                            } else {
+                                errorMessage = "HTTP " + status;
+                            }
+                            return CyclesResponse.httpError(status, errorMessage, responseBody);
                         })
         ).block();
     }
 
-    @SuppressWarnings("unchecked")
     private String extractIdempotencyKey(Object body) {
+        // Fast path: Map bodies (used by CyclesRequestBuilderService)
         if (body instanceof Map<?, ?> map) {
             Object key = map.get(Constants.IDEMPOTENCY_KEY);
             return key != null ? String.valueOf(key) : null;
         }
-        return null;
+        // POJO bodies: try reflection for getIdempotencyKey() getter
+        try {
+            Method getter = body.getClass().getMethod("getIdempotencyKey");
+            Object key = getter.invoke(body);
+            return key != null ? String.valueOf(key) : null;
+        } catch (Exception e) {
+            LOG.debug("Could not extract idempotency_key from body type {}: {}",
+                    body.getClass().getSimpleName(), e.getMessage());
+            return null;
+        }
     }
 }

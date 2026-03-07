@@ -11,6 +11,16 @@ import java.util.*;
 
 public class CyclesRequestBuilderService {
 
+    private static final Set<String> VALID_OVERAGE_POLICIES =
+            Set.of("REJECT", "ALLOW_IF_AVAILABLE", "ALLOW_WITH_OVERDRAFT");
+
+    private static final Set<String> VALID_UNITS =
+            Set.of("USD_MICROCENTS", "TOKENS", "CREDITS", "RISK_POINTS");
+
+    private static final int MAX_SUBJECT_FIELD_LENGTH = 128;
+    private static final int MAX_ACTION_KIND_LENGTH = 64;
+    private static final int MAX_ACTION_NAME_LENGTH = 256;
+
     private final CyclesValueResolutionService cyclesValueResolutionService;
 
     public CyclesRequestBuilderService(CyclesValueResolutionService cyclesValueResolutionService) {
@@ -36,13 +46,22 @@ public class CyclesRequestBuilderService {
         body.put("estimate", estimate);
 
         if (cycles.ttlMs() > 0) {
+            if (cycles.ttlMs() < 1000 || cycles.ttlMs() > 86400000) {
+                throw new CyclesProtocolException(
+                        "ttl_ms must be between 1000 and 86400000, got: " + cycles.ttlMs());
+            }
             body.put("ttl_ms", cycles.ttlMs());
         }
         if (cycles.gracePeriodMs() >= 0) {
+            if (cycles.gracePeriodMs() > 60000) {
+                throw new CyclesProtocolException(
+                        "grace_period_ms must be between 0 and 60000, got: " + cycles.gracePeriodMs());
+            }
             body.put("grace_period_ms", cycles.gracePeriodMs());
         }
 
         if (!"REJECT".equals(cycles.overagePolicy())) {
+            validateOveragePolicy(cycles.overagePolicy());
             ValidationUtils.putIfNotBlank(body, "overage_policy", cycles.overagePolicy());
         }
 
@@ -57,8 +76,8 @@ public class CyclesRequestBuilderService {
     }
 
     public Map<String, Object> buildExtend(long extendByMs, Map<String, Object> metadata) {
-        if (extendByMs <= 0) {
-            throw new CyclesProtocolException("extend_by_ms must be > 0");
+        if (extendByMs < 1 || extendByMs > 86400000) {
+            throw new CyclesProtocolException("extend_by_ms must be between 1 and 86400000, got: " + extendByMs);
         }
         Map<String, Object> body = new HashMap<>();
         body.put(Constants.IDEMPOTENCY_KEY, UUID.randomUUID().toString());
@@ -138,6 +157,7 @@ public class CyclesRequestBuilderService {
         body.put("actual", buildActual(cycles, actualAmount));
 
         if (!"REJECT".equals(cycles.overagePolicy())) {
+            validateOveragePolicy(cycles.overagePolicy());
             ValidationUtils.putIfNotBlank(body, "overage_policy", cycles.overagePolicy());
         }
 
@@ -171,7 +191,15 @@ public class CyclesRequestBuilderService {
     private Map<String, Object> buildSubject(Map<String, String> resolvedFields, String[] dimensions) {
         Map<String, Object> subject = new HashMap<>();
         for (Map.Entry<String, String> entry : resolvedFields.entrySet()) {
-            ValidationUtils.putIfNotBlank(subject, entry.getKey(), entry.getValue());
+            String value = entry.getValue();
+            if (value != null && !value.isBlank()) {
+                if (value.length() > MAX_SUBJECT_FIELD_LENGTH) {
+                    throw new CyclesProtocolException(
+                            "Subject." + entry.getKey() + " exceeds max length of " + MAX_SUBJECT_FIELD_LENGTH
+                                    + " (got " + value.length() + ")");
+                }
+                subject.put(entry.getKey(), value);
+            }
         }
         Map<String, String> dimMap = parseDimensions(dimensions);
         if (!dimMap.isEmpty()) {
@@ -184,6 +212,14 @@ public class CyclesRequestBuilderService {
     // Action
     // -------------------------
     private Map<String, Object> buildAction(String actionKind, String actionName, String[] actionTags) {
+        if (actionKind != null && actionKind.length() > MAX_ACTION_KIND_LENGTH) {
+            throw new CyclesProtocolException(
+                    "Action.kind exceeds max length of " + MAX_ACTION_KIND_LENGTH + " (got " + actionKind.length() + ")");
+        }
+        if (actionName != null && actionName.length() > MAX_ACTION_NAME_LENGTH) {
+            throw new CyclesProtocolException(
+                    "Action.name exceeds max length of " + MAX_ACTION_NAME_LENGTH + " (got " + actionName.length() + ")");
+        }
         Map<String, Object> action = new HashMap<>();
         ValidationUtils.putIfNotBlank(action, "kind", actionKind);
         ValidationUtils.putIfNotBlank(action, "name", actionName);
@@ -238,9 +274,22 @@ public class CyclesRequestBuilderService {
     // -------------------------
     // Validation
     // -------------------------
+    private static void validateOveragePolicy(String policy) {
+        if (policy != null && !policy.isBlank() && !VALID_OVERAGE_POLICIES.contains(policy)) {
+            throw new CyclesProtocolException(
+                    "Invalid overage_policy: " + policy + ". Must be one of: " + VALID_OVERAGE_POLICIES);
+        }
+    }
+
     private void validateMandatory(Map<String, String> resolvedFields,
                                    String actionKind, String actionName,
                                    long amount, String unit) {
+        // Spec: Subject.tenant is required and MUST be validated against the effective tenant
+        String tenant = resolvedFields.get(Constants.TENANT);
+        if (tenant == null || tenant.isBlank()) {
+            throw new CyclesProtocolException(
+                    "Subject.tenant is required: set via @Cycles(tenant=...), cycles.tenant config, or a CyclesFieldResolver");
+        }
         boolean hasAnySubjectField = resolvedFields.entrySet().stream()
                 .anyMatch(e -> e.getValue() != null && !e.getValue().isBlank());
         if (!hasAnySubjectField) {
@@ -253,5 +302,9 @@ public class CyclesRequestBuilderService {
             throw new CyclesProtocolException("Amount must be >= 0");
         }
         ValidationUtils.requireNotBlank(unit, "unit is mandatory");
+        if (!VALID_UNITS.contains(unit)) {
+            throw new CyclesProtocolException(
+                    "Invalid unit: " + unit + ". Must be one of: " + VALID_UNITS);
+        }
     }
 }

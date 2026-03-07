@@ -105,10 +105,31 @@ public class CyclesLifecycleService {
 
         long resT2 = System.currentTimeMillis();
 
-        // Handle dry-run
+        // Validate decision field
+        if (decision == null) {
+            String rawDecision = reservationResponse.getBodyAttributeAsString("decision");
+            LOG.error("Unrecognized decision value from server: decision={}, response={}", rawDecision, resBody);
+            throw new CyclesProtocolException(
+                    "Unrecognized decision value: " + rawDecision,
+                    ErrorCode.INTERNAL_ERROR, null, reservationResponse.getStatus());
+        }
+
+        // Handle dry-run: return typed DryRunResult with full evaluation data
         if (cycles.dryRun()) {
-            return handleDryRun(decision, reasonCode, caps, affectedScopes,
-                    reservationResponse.getStatus(), retryAfterMs, resT2 - resT1);
+            long elapsedMs = resT2 - resT1;
+            if (decision == Decision.DENY) {
+                LOG.info("Dry-run denied: elapsedTime={}ms, reasonCode={}", elapsedMs, reasonCode);
+                throw new CyclesProtocolException(
+                        "Dry-run denied: " + (reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
+                        ErrorCode.fromString(reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
+                        reasonCode,
+                        reservationResponse.getStatus(),
+                        retryAfterMs
+                );
+            }
+            LOG.info("Dry-run evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
+                    elapsedMs, decision, caps, affectedScopes);
+            return new DryRunResult(decision, caps, affectedScopes, scopePath, reserved, balances, retryAfterMs);
         }
 
         // Handle DENY
@@ -142,7 +163,7 @@ public class CyclesLifecycleService {
                 affectedScopes, scopePath, reserved, balances);
         CyclesContextHolder.set(ctx);
 
-        ScheduledFuture<?> heartbeatFuture = scheduleHeartbeat(reservationId, cycles.ttlMs(), expiresAtMs);
+        ScheduledFuture<?> heartbeatFuture = scheduleHeartbeat(reservationId, cycles.ttlMs(), expiresAtMs, ctx);
 
         try {
             // Execute guarded action
@@ -180,26 +201,6 @@ public class CyclesLifecycleService {
     }
 
     // -------------------------
-    // Dry-run
-    // -------------------------
-    private Object handleDryRun(Decision decision, String reasonCode, Caps caps,
-                                List<String> affectedScopes, int httpStatus,
-                                Long retryAfterMs, long elapsedMs) {
-        LOG.info("Dry-run reservation evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
-                elapsedMs, decision, caps, affectedScopes);
-        if (decision == Decision.DENY) {
-            throw new CyclesProtocolException(
-                    "Dry-run denied: " + (reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
-                    ErrorCode.fromString(reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
-                    reasonCode,
-                    httpStatus,
-                    retryAfterMs
-            );
-        }
-        return null;
-    }
-
-    // -------------------------
     // Commit
     // -------------------------
     private void handleCommit(String reservationId, Map<String, Object> commitBody) {
@@ -211,7 +212,12 @@ public class CyclesLifecycleService {
             LOG.debug("Commit done: elapsedTime={}ms, response={}", (comT2 - comT1), commitResponse);
 
             if (commitResponse.is2xx()) {
-                LOG.debug("Commit successful: reservationId={}", reservationId);
+                Map<String, Object> comBody = commitResponse.getBody();
+                LOG.info("Commit successful: reservationId={}, status={}, charged={}, released={}",
+                        reservationId,
+                        comBody != null ? comBody.get("status") : null,
+                        comBody != null ? comBody.get("charged") : null,
+                        comBody != null ? comBody.get("released") : null);
             } else {
                 LOG.error("Commit failed: reservationId={}, reason={}, responseBody={}",
                         reservationId, commitResponse.getErrorMessage(), commitResponse.getBody());
@@ -258,7 +264,8 @@ public class CyclesLifecycleService {
     // -------------------------
     // Heartbeat
     // -------------------------
-    private ScheduledFuture<?> scheduleHeartbeat(String reservationId, long ttlMs, Long expiresAtMs) {
+    private ScheduledFuture<?> scheduleHeartbeat(String reservationId, long ttlMs,
+                                                  Long expiresAtMs, CyclesReservationContext ctx) {
         if (expiresAtMs == null || ttlMs <= 0) {
             return null;
         }
@@ -274,10 +281,7 @@ public class CyclesLifecycleService {
                     Long newExpiresAtMs = extBody != null && extBody.get("expires_at_ms") instanceof Number n
                             ? n.longValue() : null;
                     if (newExpiresAtMs != null) {
-                        CyclesReservationContext ctx = CyclesContextHolder.get();
-                        if (ctx != null) {
-                            ctx.updateExpiresAtMs(newExpiresAtMs);
-                        }
+                        ctx.updateExpiresAtMs(newExpiresAtMs);
                     }
                     LOG.debug("Heartbeat extend successful: reservationId={}, newExpiresAtMs={}",
                             reservationId, newExpiresAtMs);
