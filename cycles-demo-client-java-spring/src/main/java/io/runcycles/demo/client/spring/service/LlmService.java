@@ -9,19 +9,10 @@ import org.springframework.stereotype.Service;
 public class LlmService {
     private static final Logger LOG = LoggerFactory.getLogger(LlmService.class);
 
-    @Cycles(
-            //tenant = "ecosystem-saulius-1",
-            //workspace = "development",
-            //app = "scalerx",
-            //workflow = "", agent = "", toolset = "",
-            estimate = "#p1 * 10",
+    @Cycles(value = "#p1 * 10",
             actual = "#result.length() * 5",
-            //useEstimateIfActualNotProvided = false,
             actionKind = "llm.completion",
-            actionName = "gpt-4"
-            //overagePolicy = "ALLOW_WITH_OVERDRAFT",
-            //unit = "USD_MICROCENTS"
-            )
+            actionName = "gpt-4")
     public String generateText(String prompt, int tokens) {
         LOG.info("Calling LLM for text generation: prompt={}, tokens={}",prompt,tokens) ;
 
