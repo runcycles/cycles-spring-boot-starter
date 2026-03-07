@@ -11,4 +11,4 @@ cycles:
   retry:
     enabled: true
     max-attempts: 5
-    delay: 2s
+    initial-delay: 2s

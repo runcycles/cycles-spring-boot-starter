@@ -33,6 +33,11 @@ public class DefaultCyclesClient implements CyclesClient {
         return executeHttpPostRequest("/v1/reservations/{id}/release", reservationId, body);
     }
 
+    @Override
+    public CyclesResponse<Map<String,Object>> extendReservation(String reservationId, Object body) {
+        return executeHttpPostRequest("/v1/reservations/{id}/extend", reservationId, body);
+    }
+
     private CyclesResponse<Map<String,Object>> executeHttpPostRequest(String uri, Object body) {
         return executeHttpPostRequest(uri, null, body);
     }
@@ -57,7 +62,9 @@ public class DefaultCyclesClient implements CyclesClient {
                                         if (response.statusCode().is2xxSuccessful()) {
                                             return CyclesResponse.success(status, responseBody);
                                         }
-                                        String error = responseBody.get("error") != null
+                                        String error = responseBody.get("message") != null
+                                                ? String.valueOf(responseBody.get("message"))
+                                                : responseBody.get("error") != null
                                                 ? String.valueOf(responseBody.get("error"))
                                                 : null;
                                         return CyclesResponse.httpError(status, error, responseBody);

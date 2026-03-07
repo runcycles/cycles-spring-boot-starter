@@ -16,6 +16,7 @@ public @interface Cycles {
 
     String actionKind();
     String actionName();
+    String[] actionTags() default {};
 
     String estimateExpression();
     String actualExpression() default "";
@@ -23,7 +24,8 @@ public @interface Cycles {
     boolean useEstimatedIfActualNotProvided() default false;
 
     String unit() default "USD_MICROCENTS";
-    long ttlMs() default 3600000;
-    String overagePolicy() default "ALLOW_WITH_OVERDRAFT";
+    long ttlMs() default 60000;
+    long gracePeriodMs() default -1;
+    String overagePolicy() default "REJECT";
 
 }
