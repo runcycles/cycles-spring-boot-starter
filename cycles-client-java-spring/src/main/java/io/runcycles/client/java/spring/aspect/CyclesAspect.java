@@ -158,8 +158,13 @@ public class CyclesAspect {
                     if (commitResponse.isTransportError() || commitResponse.is5xx()
                             || (commitErrorCode != null && commitErrorCode.isRetryable())) {
                         retryEngine.schedule(reservationId, commitBody);
+                    } else if (commitErrorCode == ErrorCode.RESERVATION_FINALIZED
+                            || commitErrorCode == ErrorCode.RESERVATION_EXPIRED) {
+                        // Reservation is already in a terminal state — nothing to release
+                        LOG.warn("Reservation already finalized/expired, skipping release: reservationId={}, errorCode={}",
+                                reservationId, commitErrorCode);
                     } else if (commitResponse.is4xx()) {
-                        handleReleaseReservation(reservationId, "commit_rejected_" + commitResponse.getStatus());
+                        handleReleaseReservation(reservationId, "commit_rejected_" + commitErrorCode);
                     } else {
                         LOG.warn("Unrecognized response: response={}", commitResponse);
                     }
@@ -201,19 +206,6 @@ public class CyclesAspect {
                 CyclesResponse<Map<String, Object>> extendResponse = client.extendReservation(reservationId, extendBody);
                 if (extendResponse.is2xx()) {
                     LOG.debug("Heartbeat extend successful: reservationId={}", reservationId);
-                    CyclesReservationContext currentCtx = CyclesContextHolder.get();
-                    if (currentCtx != null && extendResponse.getBody() != null) {
-                        Object newExpiry = extendResponse.getBody().get("expires_at_ms");
-                        if (newExpiry instanceof Number n) {
-                            CyclesContextHolder.set(new CyclesReservationContext(
-                                    currentCtx.getReservationId(),
-                                    currentCtx.getEstimate(),
-                                    currentCtx.getDecision(),
-                                    currentCtx.getCaps(),
-                                    n.longValue()
-                            ));
-                        }
-                    }
                 } else {
                     LOG.warn("Heartbeat extend failed: reservationId={}, status={}, error={}",
                             reservationId, extendResponse.getStatus(), extendResponse.getErrorMessage());

@@ -62,8 +62,10 @@ public class DefaultCyclesClient implements CyclesClient {
                                         if (response.statusCode().is2xxSuccessful()) {
                                             return CyclesResponse.success(status, responseBody);
                                         }
-                                        String error = responseBody.get("error") != null
-                                                ? String.valueOf(responseBody.get("error"))
+                                        String error = responseBody.get("message") != null
+                                                ? String.valueOf(responseBody.get("message"))
+                                                : responseBody.get("error_code") != null
+                                                ? String.valueOf(responseBody.get("error_code"))
                                                 : null;
                                         return CyclesResponse.httpError(status, error, responseBody);
                                     })
