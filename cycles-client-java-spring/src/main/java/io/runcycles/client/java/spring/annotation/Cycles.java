@@ -26,6 +26,6 @@ public @interface Cycles {
     String unit() default "USD_MICROCENTS";
     long ttlMs() default 60000;
     long gracePeriodMs() default -1;
-    String overagePolicy() default "ALLOW_WITH_OVERDRAFT";
+    String overagePolicy() default "REJECT";
 
 }

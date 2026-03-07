@@ -47,6 +47,16 @@ public class CyclesRequestBuilderService {
 
         return body;
     }
+    public Map<String, Object> buildExtend(long extendByMs) {
+        if (extendByMs <= 0) {
+            throw new CyclesProtocolException("extend_by_ms must be > 0");
+        }
+        Map<String, Object> body = new HashMap<>();
+        body.put(Constants.IDEMPOTENCY_KEY, UUID.randomUUID().toString());
+        body.put("extend_by_ms", extendByMs);
+        return body;
+    }
+
     public Map<String, Object> buildRelease(String reason) {
         Map<String, Object> body = new HashMap<>();
         body.put(Constants.IDEMPOTENCY_KEY, UUID.randomUUID().toString());
