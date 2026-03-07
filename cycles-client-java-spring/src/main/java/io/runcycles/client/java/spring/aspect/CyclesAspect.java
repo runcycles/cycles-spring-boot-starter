@@ -70,12 +70,21 @@ public class CyclesAspect {
         CyclesResponse<Map<String,Object>> reservationResponse = client.createReservation(createBody);
         if (!reservationResponse.is2xx()){
             LOG.error("Reservation failed, aborting further processing: reservationResponse={}",reservationResponse);
-            throw new CyclesProtocolException("Failed to proceed reservation: "+reservationResponse.getErrorMessage());
+            throw new CyclesProtocolException("Failed to create reservation: "+reservationResponse.getErrorMessage());
         }
-        String reservationId = extractReservationId (reservationResponse);
+        String decision = reservationResponse.getBodyAttributeAsString("decision");
+        if ("DENY".equals(decision)) {
+            String reasonCode = reservationResponse.getBodyAttributeAsString("reason_code");
+            LOG.error("Reservation denied by server: decision=DENY, reasonCode={}, response={}", reasonCode, reservationResponse.getBody());
+            throw new CyclesProtocolException("Reservation denied: " + (reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"));
+        }
+        if ("ALLOW_WITH_CAPS".equals(decision)) {
+            LOG.warn("Reservation allowed with caps: response={}", reservationResponse.getBody());
+        }
+        String reservationId = extractReservationId(reservationResponse);
         if (reservationId == null){
             LOG.error("Reservation was successful, but reservation id not found in the response body: reservationResponseBody={}",reservationResponse.getBody());
-            throw new CyclesProtocolException("Failed to proceed reservation because of missing reservation identifier");
+            throw new CyclesProtocolException("Failed to create reservation because of missing reservation identifier");
         }
         long resT2 = System.currentTimeMillis();
         LOG.info("Reservation created: elapseTime={}ms, reservationId={}",(resT2-resT1),reservationId);
@@ -117,7 +126,7 @@ public class CyclesAspect {
                     if (commitResponse.isTransportError() || commitResponse.is5xx()){
                         retryEngine.schedule(reservationId, commitBody);
                     } else if (commitResponse.is4xx()) {
-                        handleReleaseReservation(reservationId);
+                        handleReleaseReservation(reservationId, "commit_rejected_" + commitResponse.getStatus());
                     }
                     else {
                         LOG.warn("Unrecognized response so nothing to do: response={}",commitResponse);
@@ -134,7 +143,7 @@ public class CyclesAspect {
 
         } catch (Throwable ex) {
             LOG.error("Guarded method execution failed, releasing reservation: reservationId={}, cycles={}", reservationId, cycles, ex);
-            handleReleaseReservation(reservationId);
+            handleReleaseReservation(reservationId, "guarded_method_failed");
             throw ex;
         } finally {
             CyclesContextHolder.clear();
@@ -146,11 +155,11 @@ public class CyclesAspect {
     private String extractReservationId (CyclesResponse<Map<String,Object>> response){
         return response.getBodyAttributeAsString("reservation_id") ;
     }
-    private void handleReleaseReservation (String reservationId){
+    private void handleReleaseReservation (String reservationId, String reason){
         try {
-            LOG.info("Releasing reservation due to processing fault: reservationId={}",reservationId);
+            LOG.info("Releasing reservation: reservationId={}, reason={}",reservationId,reason);
             CyclesResponse<Map<String,Object>> releaseResponse = client.releaseReservation(reservationId,
-                    cyclesRequestBuilderService.buildRelease());
+                    cyclesRequestBuilderService.buildRelease(reason));
             LOG.info("Reservation released: reservationId={}, releaseResponse={}",reservationId,releaseResponse);
             if (releaseResponse.is2xx()){
                 LOG.info("Reservation released successfully: reservationId={}, responseBody={}",reservationId,releaseResponse.getBody());

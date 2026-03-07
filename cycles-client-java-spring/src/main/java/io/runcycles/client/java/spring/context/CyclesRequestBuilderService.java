@@ -6,10 +6,7 @@ import io.runcycles.client.java.spring.model.CyclesProtocolException;
 import io.runcycles.client.java.spring.util.Constants;
 import io.runcycles.client.java.spring.util.ValidationUtils;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.UUID;
+import java.util.*;
 
 public class CyclesRequestBuilderService {
 
@@ -42,10 +39,19 @@ public class CyclesRequestBuilderService {
             body.put("ttl_ms", cycles.ttlMs());
         }
 
+        if (cycles.gracePeriodMs() >= 0) {
+            body.put("grace_period_ms", cycles.gracePeriodMs());
+        }
+
+        ValidationUtils.putIfNotBlank(body, "overage_policy", cycles.overagePolicy());
+
         return body;
     }
-    public Map<String, Object> buildRelease() {
-        return Map.of(Constants.IDEMPOTENCY_KEY, UUID.randomUUID().toString()) ;
+    public Map<String, Object> buildRelease(String reason) {
+        Map<String, Object> body = new HashMap<>();
+        body.put(Constants.IDEMPOTENCY_KEY, UUID.randomUUID().toString());
+        ValidationUtils.putIfNotBlank(body, "reason", reason);
+        return body;
     }
 
     public Map<String, Object> buildCommit(Cycles cycles, long actualAmount) {
@@ -57,7 +63,6 @@ public class CyclesRequestBuilderService {
         Map<String, Object> actual = buildActual(cycles, actualAmount);
         body.put("actual", actual);
 
-        ValidationUtils.putIfNotBlank(body, "overage_policy", cycles.overagePolicy());
         return body;
     }
 
@@ -91,6 +96,10 @@ public class CyclesRequestBuilderService {
 
         ValidationUtils.putIfNotBlank(action, "kind", c.actionKind());
         ValidationUtils.putIfNotBlank(action, "name", c.actionName());
+
+        if (c.actionTags().length > 0) {
+            action.put("tags", List.of(c.actionTags()));
+        }
 
         return action;
     }
