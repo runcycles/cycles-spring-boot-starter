@@ -99,7 +99,7 @@ public class CyclesLifecycleService {
         List<String> affectedScopes = resResult.getAffectedScopes();
         String scopePath = resResult.getScopePath();
         Amount reserved = resResult.getReserved();
-        Long retryAfterMs = resResult.getRetryAfterMs();
+        Integer retryAfterMs = resResult.getRetryAfterMs();
         List<Balance> balances = resResult.getBalances();
 
         // Validate decision field

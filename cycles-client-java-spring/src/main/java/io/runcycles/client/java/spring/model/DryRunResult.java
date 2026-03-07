@@ -16,13 +16,13 @@ public class DryRunResult {
     private final String scopePath;
     private final Amount reserved;
     private final List<Balance> balances;
-    private final Long retryAfterMs;
+    private final Integer retryAfterMs;
 
     public DryRunResult(Decision decision, Caps caps,
                         List<String> affectedScopes, String scopePath,
                         Amount reserved,
                         List<Balance> balances,
-                        Long retryAfterMs) {
+                        Integer retryAfterMs) {
         this.decision = decision;
         this.caps = caps;
         this.affectedScopes = affectedScopes;
@@ -38,7 +38,7 @@ public class DryRunResult {
     public String getScopePath() { return scopePath; }
     public Amount getReserved() { return reserved; }
     public List<Balance> getBalances() { return balances; }
-    public Long getRetryAfterMs() { return retryAfterMs; }
+    public Integer getRetryAfterMs() { return retryAfterMs; }
 
     public boolean isAllowed() { return decision == Decision.ALLOW || decision == Decision.ALLOW_WITH_CAPS; }
     public boolean hasCaps() { return caps != null; }
