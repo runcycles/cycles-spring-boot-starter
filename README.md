@@ -314,7 +314,7 @@ public String checkBudget(String prompt, int tokens) {
 }
 ```
 
-The dry-run response includes `decision`, `caps`, and `affected_scopes` — accessible via `CyclesContextHolder` briefly before it's cleared.
+The dry-run response includes `decision`, `caps`, and `affected_scopes` in the server response. Since the method does not execute, `CyclesContextHolder` is not populated — use the returned value (null) as a signal that the dry-run completed, and inspect server logs for decision details.
 
 ## Metrics on Commit
 

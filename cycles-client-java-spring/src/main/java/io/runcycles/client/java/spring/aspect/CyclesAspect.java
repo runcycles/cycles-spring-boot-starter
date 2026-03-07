@@ -106,19 +106,12 @@ public class CyclesAspect {
 
         long resT2 = System.currentTimeMillis();
 
-        // dry_run: server evaluates but does not persist — no reservation_id, no commit/release
+        // dry_run: server evaluates but does not persist — no reservation_id, no commit/release.
+        // Method does NOT execute per spec; no commit/release needed.
         if (cycles.dryRun()) {
             LOG.info("Dry-run reservation evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
                     (resT2 - resT1), decision, caps, resBody.get("affected_scopes"));
-            // Expose context briefly so callers can inspect decision/caps, then clear
-            CyclesReservationContext ctx = new CyclesReservationContext(
-                    null, estimate, decision, caps, null);
-            CyclesContextHolder.set(ctx);
-            try {
-                return null;
-            } finally {
-                CyclesContextHolder.clear();
-            }
+            return null;
         }
 
         if (reservationId == null) {
@@ -138,7 +131,7 @@ public class CyclesAspect {
 
         try {
             Object result = pjp.proceed();
-            long methodElapsed = (int) (System.currentTimeMillis() - resT2);
+            long methodElapsed = System.currentTimeMillis() - resT2;
             LOG.info("Annotated method finished: reservationId={}, methodElapsedMs={}", reservationId, methodElapsed);
 
             long actual;

@@ -116,7 +116,8 @@ public class CyclesRequestBuilderService {
     }
 
     public Map<String, Object> buildEvent(Cycles cycles, long actualAmount,
-                                           CyclesMetrics metrics, Map<String, Object> metadata) {
+                                           CyclesMetrics metrics, Long clientTimeMs,
+                                           Map<String, Object> metadata) {
         Objects.requireNonNull(cycles, "Cycles annotation must not be null");
 
         Map<String, String> resolvedFields = resolveSubjectFields(cycles);
@@ -135,6 +136,9 @@ public class CyclesRequestBuilderService {
 
         if (metrics != null && !metrics.isEmpty()) {
             body.put(Constants.METRICS, metrics.toMap());
+        }
+        if (clientTimeMs != null) {
+            body.put("client_time_ms", clientTimeMs);
         }
         if (metadata != null && !metadata.isEmpty()) {
             body.put(Constants.METADATA, metadata);
@@ -228,7 +232,13 @@ public class CyclesRequestBuilderService {
     // Validation
     // -------------------------
     private void validateReservationMandatory(Cycles c, Map<String, String> resolvedFields, long amount) {
-        ValidationUtils.requireNotBlank(resolvedFields.get(Constants.TENANT), "tenant is mandatory");
+        // Spec: Subject requires at least one standard field (anyOf: tenant, workspace, app, workflow, agent, toolset)
+        boolean hasAnySubjectField = resolvedFields.entrySet().stream()
+                .anyMatch(e -> e.getValue() != null && !e.getValue().isBlank());
+        if (!hasAnySubjectField) {
+            throw new CyclesProtocolException(
+                    "At least one Subject field (tenant, workspace, app, workflow, agent, or toolset) is required");
+        }
         ValidationUtils.requireNotBlank(c.actionKind(), "actionKind is mandatory");
         ValidationUtils.requireNotBlank(c.actionName(), "actionName is mandatory");
         if (amount < 0) {
