@@ -114,10 +114,22 @@ public class CyclesLifecycleService {
                     ErrorCode.INTERNAL_ERROR, null, reservationResponse.getStatus());
         }
 
-        // Handle dry-run
+        // Handle dry-run: return typed DryRunResult with full evaluation data
         if (cycles.dryRun()) {
-            return handleDryRun(decision, reasonCode, caps, affectedScopes,
-                    reservationResponse.getStatus(), retryAfterMs, resT2 - resT1);
+            long elapsedMs = resT2 - resT1;
+            if (decision == Decision.DENY) {
+                LOG.info("Dry-run denied: elapsedTime={}ms, reasonCode={}", elapsedMs, reasonCode);
+                throw new CyclesProtocolException(
+                        "Dry-run denied: " + (reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
+                        ErrorCode.fromString(reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
+                        reasonCode,
+                        reservationResponse.getStatus(),
+                        retryAfterMs
+                );
+            }
+            LOG.info("Dry-run evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
+                    elapsedMs, decision, caps, affectedScopes);
+            return new DryRunResult(decision, caps, affectedScopes, scopePath, reserved, balances, retryAfterMs);
         }
 
         // Handle DENY
@@ -186,26 +198,6 @@ public class CyclesLifecycleService {
             cancelHeartbeat(heartbeatFuture);
             CyclesContextHolder.clear();
         }
-    }
-
-    // -------------------------
-    // Dry-run
-    // -------------------------
-    private Object handleDryRun(Decision decision, String reasonCode, Caps caps,
-                                List<String> affectedScopes, int httpStatus,
-                                Long retryAfterMs, long elapsedMs) {
-        LOG.info("Dry-run reservation evaluated: elapsedTime={}ms, decision={}, caps={}, affectedScopes={}",
-                elapsedMs, decision, caps, affectedScopes);
-        if (decision == Decision.DENY) {
-            throw new CyclesProtocolException(
-                    "Dry-run denied: " + (reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
-                    ErrorCode.fromString(reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
-                    reasonCode,
-                    httpStatus,
-                    retryAfterMs
-            );
-        }
-        return null;
     }
 
     // -------------------------

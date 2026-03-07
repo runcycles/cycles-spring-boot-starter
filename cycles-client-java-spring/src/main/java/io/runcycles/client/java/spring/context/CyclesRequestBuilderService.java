@@ -11,6 +11,9 @@ import java.util.*;
 
 public class CyclesRequestBuilderService {
 
+    private static final Set<String> VALID_OVERAGE_POLICIES =
+            Set.of("REJECT", "ALLOW_IF_AVAILABLE", "ALLOW_WITH_OVERDRAFT");
+
     private final CyclesValueResolutionService cyclesValueResolutionService;
 
     public CyclesRequestBuilderService(CyclesValueResolutionService cyclesValueResolutionService) {
@@ -51,6 +54,7 @@ public class CyclesRequestBuilderService {
         }
 
         if (!"REJECT".equals(cycles.overagePolicy())) {
+            validateOveragePolicy(cycles.overagePolicy());
             ValidationUtils.putIfNotBlank(body, "overage_policy", cycles.overagePolicy());
         }
 
@@ -146,6 +150,7 @@ public class CyclesRequestBuilderService {
         body.put("actual", buildActual(cycles, actualAmount));
 
         if (!"REJECT".equals(cycles.overagePolicy())) {
+            validateOveragePolicy(cycles.overagePolicy());
             ValidationUtils.putIfNotBlank(body, "overage_policy", cycles.overagePolicy());
         }
 
@@ -246,9 +251,22 @@ public class CyclesRequestBuilderService {
     // -------------------------
     // Validation
     // -------------------------
+    private static void validateOveragePolicy(String policy) {
+        if (policy != null && !policy.isBlank() && !VALID_OVERAGE_POLICIES.contains(policy)) {
+            throw new CyclesProtocolException(
+                    "Invalid overage_policy: " + policy + ". Must be one of: " + VALID_OVERAGE_POLICIES);
+        }
+    }
+
     private void validateMandatory(Map<String, String> resolvedFields,
                                    String actionKind, String actionName,
                                    long amount, String unit) {
+        // Spec: Subject.tenant is required and MUST be validated against the effective tenant
+        String tenant = resolvedFields.get(Constants.TENANT);
+        if (tenant == null || tenant.isBlank()) {
+            throw new CyclesProtocolException(
+                    "Subject.tenant is required: set via @Cycles(tenant=...), cycles.tenant config, or a CyclesFieldResolver");
+        }
         boolean hasAnySubjectField = resolvedFields.entrySet().stream()
                 .anyMatch(e -> e.getValue() != null && !e.getValue().isBlank());
         if (!hasAnySubjectField) {
