@@ -5,6 +5,7 @@ import io.runcycles.client.java.spring.aspect.CyclesAspect;
 import io.runcycles.client.java.spring.client.CyclesClient;
 import io.runcycles.client.java.spring.client.DefaultCyclesClient;
 import io.runcycles.client.java.spring.config.CyclesProperties;
+import io.runcycles.client.java.spring.context.CyclesLifecycleService;
 import io.runcycles.client.java.spring.context.CyclesRequestBuilderService;
 import io.runcycles.client.java.spring.evaluation.CyclesExpressionEvaluator;
 import io.runcycles.client.java.spring.evaluation.CyclesFieldResolver;
@@ -82,11 +83,16 @@ public class CyclesAutoConfiguration {
     }
 
     @Bean
-    public CyclesAspect aspect(CyclesClient client,
-                               CommitRetryEngine retryEngine,
-                               CyclesRequestBuilderService cyclesRequestBuilderService,
-                               CyclesExpressionEvaluator evaluator,
-                               CyclesProperties props) {
-        return new CyclesAspect(client, retryEngine, cyclesRequestBuilderService, evaluator, props);
+    @ConditionalOnMissingBean
+    public CyclesLifecycleService cyclesLifecycleService(CyclesClient client,
+                                                         CommitRetryEngine retryEngine,
+                                                         CyclesRequestBuilderService requestBuilderService,
+                                                         CyclesExpressionEvaluator evaluator) {
+        return new CyclesLifecycleService(client, retryEngine, requestBuilderService, evaluator);
+    }
+
+    @Bean
+    public CyclesAspect aspect(CyclesLifecycleService lifecycleService) {
+        return new CyclesAspect(lifecycleService);
     }
 }
