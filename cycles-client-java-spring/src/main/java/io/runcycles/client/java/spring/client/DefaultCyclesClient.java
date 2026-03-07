@@ -23,62 +23,62 @@ public class DefaultCyclesClient implements CyclesClient {
     // ---- Core reservation lifecycle ----
 
     @Override
-    public CyclesResponse<Map<String,Object>> createReservation(Object body) {
-        LOG.info("Executing reservation create via cycles remote service");
+    public CyclesResponse<Map<String, Object>> createReservation(Object body) {
+        LOG.debug("Executing reservation create via cycles remote service");
         return executePost("/v1/reservations", null, body);
     }
 
     @Override
-    public CyclesResponse<Map<String,Object>> commitReservation(String reservationId, Object body) {
+    public CyclesResponse<Map<String, Object>> commitReservation(String reservationId, Object body) {
         return executePost("/v1/reservations/{id}/commit", reservationId, body);
     }
 
     @Override
-    public CyclesResponse<Map<String,Object>> releaseReservation(String reservationId, Object body) {
+    public CyclesResponse<Map<String, Object>> releaseReservation(String reservationId, Object body) {
         return executePost("/v1/reservations/{id}/release", reservationId, body);
     }
 
     @Override
-    public CyclesResponse<Map<String,Object>> extendReservation(String reservationId, Object body) {
+    public CyclesResponse<Map<String, Object>> extendReservation(String reservationId, Object body) {
         return executePost("/v1/reservations/{id}/extend", reservationId, body);
     }
 
     // ---- Optional endpoints ----
 
     @Override
-    public CyclesResponse<Map<String,Object>> decide(Object body) {
-        LOG.info("Executing decide via cycles remote service");
+    public CyclesResponse<Map<String, Object>> decide(Object body) {
+        LOG.debug("Executing decide via cycles remote service");
         return executePost("/v1/decide", null, body);
     }
 
     @Override
-    public CyclesResponse<Map<String,Object>> listReservations(Map<String,String> queryParams) {
-        LOG.info("Listing reservations: queryParams={}", queryParams);
+    public CyclesResponse<Map<String, Object>> listReservations(Map<String, String> queryParams) {
+        LOG.debug("Listing reservations: queryParams={}", queryParams);
         return executeGet("/v1/reservations", null, queryParams);
     }
 
     @Override
-    public CyclesResponse<Map<String,Object>> getReservation(String reservationId) {
-        LOG.info("Getting reservation: reservationId={}", reservationId);
+    public CyclesResponse<Map<String, Object>> getReservation(String reservationId) {
+        LOG.debug("Getting reservation: reservationId={}", reservationId);
         return executeGet("/v1/reservations/{id}", reservationId, null);
     }
 
     @Override
-    public CyclesResponse<Map<String,Object>> getBalances(Map<String,String> queryParams) {
-        LOG.info("Querying balances: queryParams={}", queryParams);
+    public CyclesResponse<Map<String, Object>> getBalances(Map<String, String> queryParams) {
+        LOG.debug("Querying balances: queryParams={}", queryParams);
         return executeGet("/v1/balances", null, queryParams);
     }
 
     @Override
-    public CyclesResponse<Map<String,Object>> createEvent(Object body) {
-        LOG.info("Creating event via cycles remote service");
+    public CyclesResponse<Map<String, Object>> createEvent(Object body) {
+        LOG.debug("Creating event via cycles remote service");
         return executePost("/v1/events", null, body);
     }
 
     // ---- HTTP helpers ----
 
-    private CyclesResponse<Map<String,Object>> executePost(String uri, String pathParam, Object body) {
-        LOG.info("Started executing POST: uri={}, pathParam={}", uri, pathParam);
+    private CyclesResponse<Map<String, Object>> executePost(String uri, String pathParam, Object body) {
+        LOG.debug("Started executing POST: uri={}, pathParam={}", uri, pathParam);
         try {
             String idempotencyKey = extractIdempotencyKey(body);
 
@@ -102,13 +102,13 @@ public class DefaultCyclesClient implements CyclesClient {
             LOG.error("Failed to execute POST: uri={}, pathParam={}", uri, pathParam, ex);
             return CyclesResponse.transportError(ex);
         } finally {
-            LOG.info("Finished POST: uri={}, pathParam={}", uri, pathParam);
+            LOG.debug("Finished POST: uri={}, pathParam={}", uri, pathParam);
         }
     }
 
-    private CyclesResponse<Map<String,Object>> executeGet(String uri, String pathParam,
-                                                           Map<String,String> queryParams) {
-        LOG.info("Started executing GET: uri={}, pathParam={}, queryParams={}", uri, pathParam, queryParams);
+    private CyclesResponse<Map<String, Object>> executeGet(String uri, String pathParam,
+                                                           Map<String, String> queryParams) {
+        LOG.debug("Started executing GET: uri={}, pathParam={}, queryParams={}", uri, pathParam, queryParams);
         try {
             WebClient.RequestHeadersSpec<?> request = webClient.get()
                     .uri(uriBuilder -> {
@@ -128,11 +128,11 @@ public class DefaultCyclesClient implements CyclesClient {
             LOG.error("Failed to execute GET: uri={}, pathParam={}", uri, pathParam, ex);
             return CyclesResponse.transportError(ex);
         } finally {
-            LOG.info("Finished GET: uri={}, pathParam={}", uri, pathParam);
+            LOG.debug("Finished GET: uri={}, pathParam={}", uri, pathParam);
         }
     }
 
-    private CyclesResponse<Map<String,Object>> exchangeAndMap(WebClient.RequestHeadersSpec<?> request) {
+    private CyclesResponse<Map<String, Object>> exchangeAndMap(WebClient.RequestHeadersSpec<?> request) {
         return request.exchangeToMono(response ->
                 response.bodyToMono(MAP_TYPE)
                         .defaultIfEmpty(Map.of())

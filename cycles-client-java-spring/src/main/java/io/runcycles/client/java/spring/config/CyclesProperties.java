@@ -9,7 +9,7 @@ public class CyclesProperties {
 
     private String baseUrl;
     private String apiKey;
-    //protocol properties as defaults for Cycles annotation
+    // Protocol properties as defaults for @Cycles annotation
     private String tenant;
     private String workspace;
     private String app;
@@ -55,51 +55,16 @@ public class CyclesProperties {
     public Http getHttp() { return http; }
     public Retry getRetry() { return retry; }
 
-    public String getTenant() {
-        return tenant;
-    }
-
-    public void setTenant(String tenant) {
-        this.tenant = tenant;
-    }
-
-    public String getWorkspace() {
-        return workspace;
-    }
-
-    public void setWorkspace(String workspace) {
-        this.workspace = workspace;
-    }
-
-    public String getApp() {
-        return app;
-    }
-
-    public void setApp(String app) {
-        this.app = app;
-    }
-
-    public String getWorkflow() {
-        return workflow;
-    }
-
-    public void setWorkflow(String workflow) {
-        this.workflow = workflow;
-    }
-
-    public String getAgent() {
-        return agent;
-    }
-
-    public void setAgent(String agent) {
-        this.agent = agent;
-    }
-
-    public String getToolset() {
-        return toolset;
-    }
-
-    public void setToolset(String toolset) {
-        this.toolset = toolset;
-    }
+    public String getTenant() { return tenant; }
+    public void setTenant(String tenant) { this.tenant = tenant; }
+    public String getWorkspace() { return workspace; }
+    public void setWorkspace(String workspace) { this.workspace = workspace; }
+    public String getApp() { return app; }
+    public void setApp(String app) { this.app = app; }
+    public String getWorkflow() { return workflow; }
+    public void setWorkflow(String workflow) { this.workflow = workflow; }
+    public String getAgent() { return agent; }
+    public void setAgent(String agent) { this.agent = agent; }
+    public String getToolset() { return toolset; }
+    public void setToolset(String toolset) { this.toolset = toolset; }
 }
