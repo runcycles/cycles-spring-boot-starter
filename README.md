@@ -135,7 +135,7 @@ cycles:
 
 | Parameter | Required | Default | Description |
 |---|---|---|---|
-| `value` | Yes | — | Estimate: SpEL expression for estimated cost (enables `@Cycles("1000")` shorthand) |
+| `value` / `estimate` | Yes (one) | — | SpEL expression for estimated cost. Synonyms — use either one. `value` enables `@Cycles("1000")` shorthand; `estimate` reads naturally with `actual`. |
 | `actionKind` | No | class name | Action category (e.g., `llm.completion`, `tool.search`) |
 | `actionName` | No | method name | Action identifier (e.g., `gpt-4`, `web.search`) |
 | `actual` | No | `""` | SpEL expression for actual cost (evaluated after method returns) |
