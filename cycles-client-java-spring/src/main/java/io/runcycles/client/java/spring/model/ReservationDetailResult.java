@@ -9,7 +9,7 @@ import java.util.Map;
  */
 public class ReservationDetailResult {
     private final String reservationId;
-    private final String status;
+    private final ReservationStatus status;
     private final String idempotencyKey;
     private final Subject subject;
     private final Action action;
@@ -22,7 +22,7 @@ public class ReservationDetailResult {
     private final List<String> affectedScopes;
     private final Map<String, Object> metadata;
 
-    private ReservationDetailResult(String reservationId, String status, String idempotencyKey,
+    private ReservationDetailResult(String reservationId, ReservationStatus status, String idempotencyKey,
                                     Subject subject, Action action,
                                     Amount reserved, Amount committed,
                                     Long createdAtMs, Long expiresAtMs, Long finalizedAtMs,
@@ -48,7 +48,7 @@ public class ReservationDetailResult {
         if (map == null) return null;
         return new ReservationDetailResult(
                 map.get("reservation_id") instanceof String s ? s : null,
-                map.get("status") instanceof String s ? s : null,
+                ReservationStatus.fromString(map.get("status") instanceof String s ? s : null),
                 map.get("idempotency_key") instanceof String s ? s : null,
                 map.get("subject") instanceof Map<?, ?> m ? Subject.fromMap((Map<String, Object>) m) : null,
                 map.get("action") instanceof Map<?, ?> m ? Action.fromMap((Map<String, Object>) m) : null,
@@ -64,7 +64,7 @@ public class ReservationDetailResult {
     }
 
     public String getReservationId() { return reservationId; }
-    public String getStatus() { return status; }
+    public ReservationStatus getStatus() { return status; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public Subject getSubject() { return subject; }
     public Action getAction() { return action; }
@@ -77,10 +77,10 @@ public class ReservationDetailResult {
     public List<String> getAffectedScopes() { return affectedScopes; }
     public Map<String, Object> getMetadata() { return metadata; }
 
-    public boolean isActive() { return "ACTIVE".equals(status); }
-    public boolean isCommitted() { return "COMMITTED".equals(status); }
-    public boolean isReleased() { return "RELEASED".equals(status); }
-    public boolean isExpired() { return "EXPIRED".equals(status); }
+    public boolean isActive() { return status == ReservationStatus.ACTIVE; }
+    public boolean isCommitted() { return status == ReservationStatus.COMMITTED; }
+    public boolean isReleased() { return status == ReservationStatus.RELEASED; }
+    public boolean isExpired() { return status == ReservationStatus.EXPIRED; }
 
     @Override
     public String toString() {
