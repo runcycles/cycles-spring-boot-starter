@@ -18,18 +18,18 @@ public class CyclesValueResolutionService {
     }
     public String resolve(String fieldName, String annotationValue) {
 
-        // 1️⃣ Annotation override (fast path)
+        // 1. Annotation override (fast path)
         if (ValidationUtils.hasText(annotationValue)) {
             return annotationValue;
         }
 
-        // 2️⃣ Configuration (fast switch)
+        // 2. Configuration (fast switch)
         String configValue = getFromConfig(fieldName);
         if (ValidationUtils.hasText(configValue)) {
             return configValue;
         }
 
-        // 3️⃣ Direct O(1) concurrent lookup
+        // 3. Direct O(1) concurrent lookup
         CyclesFieldResolver resolver = resolverMap.get(fieldName);
         if (resolver == null) {
             return null;

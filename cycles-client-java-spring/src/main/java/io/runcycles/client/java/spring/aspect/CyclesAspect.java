@@ -135,7 +135,7 @@ public class CyclesAspect {
             LOG.error("Reservation denied: decision=DENY, reasonCode={}, response={}", reasonCode, resBody);
             throw new CyclesProtocolException(
                     "Reservation denied: " + (reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
-                    ErrorCode.fromString(reasonCode),
+                    ErrorCode.fromString(reasonCode != null ? reasonCode : "BUDGET_EXCEEDED"),
                     reasonCode,
                     reservationResponse.getStatus()
             );
