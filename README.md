@@ -78,9 +78,9 @@ public String generateText(String prompt, int tokens) { ... }
 │  3. Start heartbeat (POST .../extend at ttlMs/2 intervals)  │
 │  4. Execute the guarded method                               │
 │     ├─ Success → evaluate actual expression                  │
-│     │            POST /v1/reservations/{id}/commit            │
+│     │            POST /v1/reservations/{reservation_id}/commit            │
 │     │            (retries on transient failure)               │
-│     └─ Failure → POST /v1/reservations/{id}/release          │
+│     └─ Failure → POST /v1/reservations/{reservation_id}/release          │
 │  5. Cancel heartbeat, clear CyclesContextHolder              │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
@@ -278,7 +278,7 @@ public class TenantResolver implements CyclesFieldResolver {
 
 ## Heartbeat (Automatic TTL Extension)
 
-For long-running methods, the starter automatically extends the reservation TTL via the `/v1/reservations/{id}/extend` endpoint. The heartbeat fires at `ttlMs / 2` intervals to prevent the reservation from expiring while the method is still executing.
+For long-running methods, the starter automatically extends the reservation TTL via the `/v1/reservations/{reservation_id}/extend` endpoint. The heartbeat fires at `ttlMs / 2` intervals to prevent the reservation from expiring while the method is still executing.
 
 No configuration needed — it activates automatically when the server returns an `expires_at_ms` in the reservation response.
 
@@ -441,12 +441,12 @@ This starter implements the [Cycles Protocol v0](https://github.com/runcycles/cy
 | Feature | Status | Notes |
 |---|---|---|
 | `POST /v1/reservations` (create) | Implemented | Core — via `@Cycles` annotation and `CyclesClient` |
-| `POST /v1/reservations/{id}/commit` | Implemented | Core — automatic after guarded method returns |
-| `POST /v1/reservations/{id}/release` | Implemented | Core — automatic on method failure |
-| `POST /v1/reservations/{id}/extend` | Implemented | Core — automatic heartbeat |
+| `POST /v1/reservations/{reservation_id}/commit` | Implemented | Core — automatic after guarded method returns |
+| `POST /v1/reservations/{reservation_id}/release` | Implemented | Core — automatic on method failure |
+| `POST /v1/reservations/{reservation_id}/extend` | Implemented | Core — automatic heartbeat |
 | `POST /v1/decide` | Implemented | Programmatic via `CyclesClient.decide()` |
 | `GET /v1/reservations` | Implemented | Programmatic via `CyclesClient.listReservations()` |
-| `GET /v1/reservations/{id}` | Implemented | Programmatic via `CyclesClient.getReservation()` |
+| `GET /v1/reservations/{reservation_id}` | Implemented | Programmatic via `CyclesClient.getReservation()` |
 | `GET /v1/balances` | Implemented | Programmatic via `CyclesClient.getBalances()` |
 | `POST /v1/events` | Implemented | Programmatic via `CyclesClient.createEvent()` |
 | `dry_run` on reservation | Implemented | Via `@Cycles(dryRun = true)` — method does not execute |
