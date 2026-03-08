@@ -51,6 +51,18 @@ public class Subject {
     public String getToolset() { return toolset; }
     public Map<String, String> getDimensions() { return dimensions; }
 
+    public Map<String, Object> toMap() {
+        Map<String, Object> map = new java.util.HashMap<>();
+        if (tenant != null) map.put("tenant", tenant);
+        if (workspace != null) map.put("workspace", workspace);
+        if (app != null) map.put("app", app);
+        if (workflow != null) map.put("workflow", workflow);
+        if (agent != null) map.put("agent", agent);
+        if (toolset != null) map.put("toolset", toolset);
+        if (dimensions != null && !dimensions.isEmpty()) map.put("dimensions", dimensions);
+        return map;
+    }
+
     public boolean hasAtLeastOneStandardField() {
         return isNonBlank(tenant) || isNonBlank(workspace) || isNonBlank(app)
                 || isNonBlank(workflow) || isNonBlank(agent) || isNonBlank(toolset);

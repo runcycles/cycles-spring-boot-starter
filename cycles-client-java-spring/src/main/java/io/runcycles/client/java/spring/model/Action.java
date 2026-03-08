@@ -32,6 +32,14 @@ public class Action {
     public String getName() { return name; }
     public List<String> getTags() { return tags; }
 
+    public Map<String, Object> toMap() {
+        Map<String, Object> map = new java.util.HashMap<>();
+        if (kind != null) map.put("kind", kind);
+        if (name != null) map.put("name", name);
+        if (tags != null) map.put("tags", tags);
+        return map;
+    }
+
     @Override
     public String toString() {
         return "Action{kind='" + kind + '\'' +
