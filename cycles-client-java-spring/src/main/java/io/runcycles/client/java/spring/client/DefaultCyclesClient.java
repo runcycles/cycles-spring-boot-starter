@@ -32,17 +32,17 @@ public class DefaultCyclesClient implements CyclesClient {
 
     @Override
     public CyclesResponse<Map<String, Object>> commitReservation(String reservationId, Object body) {
-        return executePost("/v1/reservations/{id}/commit", reservationId, body);
+        return executePost("/v1/reservations/{reservation_id}/commit", reservationId, body);
     }
 
     @Override
     public CyclesResponse<Map<String, Object>> releaseReservation(String reservationId, Object body) {
-        return executePost("/v1/reservations/{id}/release", reservationId, body);
+        return executePost("/v1/reservations/{reservation_id}/release", reservationId, body);
     }
 
     @Override
     public CyclesResponse<Map<String, Object>> extendReservation(String reservationId, Object body) {
-        return executePost("/v1/reservations/{id}/extend", reservationId, body);
+        return executePost("/v1/reservations/{reservation_id}/extend", reservationId, body);
     }
 
     // ---- Optional endpoints ----
@@ -62,7 +62,7 @@ public class DefaultCyclesClient implements CyclesClient {
     @Override
     public CyclesResponse<Map<String, Object>> getReservation(String reservationId) {
         LOG.debug("Getting reservation: reservationId={}", reservationId);
-        return executeGet("/v1/reservations/{id}", reservationId, null);
+        return executeGet("/v1/reservations/{reservation_id}", reservationId, null);
     }
 
     @Override
