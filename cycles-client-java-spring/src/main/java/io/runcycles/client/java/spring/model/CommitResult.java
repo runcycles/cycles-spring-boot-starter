@@ -9,12 +9,12 @@ import java.util.Map;
  * Spec constrains status to enum {@code [COMMITTED]}.
  */
 public class CommitResult {
-    private final ReservationStatus status;
+    private final CommitStatus status;
     private final Amount charged;
     private final Amount released;
     private final List<Balance> balances;
 
-    private CommitResult(ReservationStatus status, Amount charged, Amount released, List<Balance> balances) {
+    private CommitResult(CommitStatus status, Amount charged, Amount released, List<Balance> balances) {
         this.status = status;
         this.charged = charged;
         this.released = released;
@@ -25,14 +25,14 @@ public class CommitResult {
     public static CommitResult fromMap(Map<String, Object> map) {
         if (map == null) return null;
         return new CommitResult(
-                ReservationStatus.fromString(map.get("status") instanceof String s ? s : null),
+                CommitStatus.fromString(map.get("status") instanceof String s ? s : null),
                 map.get("charged") instanceof Map<?, ?> m ? Amount.fromMap((Map<String, Object>) m) : null,
                 map.get("released") instanceof Map<?, ?> m ? Amount.fromMap((Map<String, Object>) m) : null,
                 Balance.listFromRaw(map.get("balances") instanceof List<?> l ? l : null)
         );
     }
 
-    public ReservationStatus getStatus() { return status; }
+    public CommitStatus getStatus() { return status; }
     public Amount getCharged() { return charged; }
     public Amount getReleased() { return released; }
     public List<Balance> getBalances() { return balances; }

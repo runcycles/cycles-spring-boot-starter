@@ -326,21 +326,34 @@ public class CyclesLifecycleService {
     }
 
     private CyclesProtocolException buildProtocolException(String prefix, CyclesResponse<Map<String, Object>> response) {
-        ErrorCode errorCode = extractErrorCode(response);
-        String errorField = response.getBodyAttributeAsString("error");
-        String requestId = response.getBodyAttributeAsString("request_id");
-        String message = prefix + ": " + (response.getErrorMessage() != null ? response.getErrorMessage() : "unknown error");
-        if (requestId != null) {
-            LOG.error("Server error response: requestId={}, errorCode={}, status={}", requestId, errorField, response.getStatus());
+        ErrorResponse errorResponse = response.getErrorResponse();
+        ErrorCode errorCode;
+        String reasonCode = null;
+        String message;
+
+        if (errorResponse != null) {
+            errorCode = errorResponse.getErrorCode();
+            reasonCode = errorResponse.getErrorCode() != null ? errorResponse.getErrorCode().name() : null;
+            String serverMessage = errorResponse.getMessage();
+            message = prefix + ": " + (serverMessage != null ? serverMessage : "unknown error");
+            String requestId = errorResponse.getRequestId();
+            if (requestId != null) {
+                LOG.error("Server error response: requestId={}, errorCode={}, status={}", requestId, errorCode, response.getStatus());
+            }
+        } else {
+            errorCode = ErrorCode.fromString(response.getBodyAttributeAsString("error"));
+            message = prefix + ": " + (response.getErrorMessage() != null ? response.getErrorMessage() : "unknown error");
         }
-        return new CyclesProtocolException(message, errorCode, errorField, response.getStatus());
+
+        return new CyclesProtocolException(message, errorCode, reasonCode, response.getStatus());
     }
 
     private ErrorCode extractErrorCode(CyclesResponse<Map<String, Object>> response) {
-        String errorCodeStr = response.getBodyAttributeAsString("error");
-        if (errorCodeStr == null) {
-            errorCodeStr = response.getBodyAttributeAsString("reason_code");
+        ErrorResponse errorResponse = response.getErrorResponse();
+        if (errorResponse != null && errorResponse.getErrorCode() != null) {
+            return errorResponse.getErrorCode();
         }
+        String errorCodeStr = response.getBodyAttributeAsString("error");
         return ErrorCode.fromString(errorCodeStr);
     }
 

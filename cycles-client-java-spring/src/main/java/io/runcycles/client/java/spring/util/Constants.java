@@ -15,5 +15,11 @@ public class Constants {
     public static final String METRICS = "metrics";
     public static final String METADATA = "metadata";
 
+    public static final String INCLUDE_CHILDREN = "include_children";
+    public static final String LIMIT = "limit";
+    public static final String CURSOR = "cursor";
+    public static final String STATUS = "status";
+
     public static final String X_IDEMPOTENCY_KEY_HEADER = "X-Idempotency-Key";
+    public static final String X_CYCLES_API_KEY_HEADER = "X-Cycles-API-Key";
 }

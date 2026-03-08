@@ -12,6 +12,7 @@ import io.runcycles.client.java.spring.evaluation.CyclesFieldResolver;
 import io.runcycles.client.java.spring.evaluation.CyclesValueResolutionService;
 import io.runcycles.client.java.spring.retry.CommitRetryEngine;
 import io.runcycles.client.java.spring.retry.InMemoryCommitRetryEngine;
+import io.runcycles.client.java.spring.util.Constants;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -43,7 +44,7 @@ public class CyclesAutoConfiguration {
         return WebClient.builder()
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .baseUrl(props.getBaseUrl())
-                .defaultHeader("X-Cycles-API-Key", props.getApiKey())
+                .defaultHeader(Constants.X_CYCLES_API_KEY_HEADER, props.getApiKey())
                 .build();
     }
 
