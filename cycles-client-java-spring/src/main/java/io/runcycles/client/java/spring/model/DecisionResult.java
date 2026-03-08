@@ -11,11 +11,11 @@ public class DecisionResult {
     private final Decision decision;
     private final Caps caps;
     private final String reasonCode;
-    private final Long retryAfterMs;
+    private final Integer retryAfterMs;
     private final List<String> affectedScopes;
 
     private DecisionResult(Decision decision, Caps caps, String reasonCode,
-                           Long retryAfterMs, List<String> affectedScopes) {
+                           Integer retryAfterMs, List<String> affectedScopes) {
         this.decision = decision;
         this.caps = caps;
         this.reasonCode = reasonCode;
@@ -30,7 +30,7 @@ public class DecisionResult {
                 Decision.fromString(map.get("decision") instanceof String s ? s : null),
                 Caps.fromMap(map.get("caps") instanceof Map<?, ?> m ? (Map<String, Object>) m : null),
                 map.get("reason_code") instanceof String s ? s : null,
-                map.get("retry_after_ms") instanceof Number n ? n.longValue() : null,
+                map.get("retry_after_ms") instanceof Number n ? n.intValue() : null,
                 map.get("affected_scopes") instanceof List<?> l ? (List<String>) l : List.of()
         );
     }
@@ -38,7 +38,7 @@ public class DecisionResult {
     public Decision getDecision() { return decision; }
     public Caps getCaps() { return caps; }
     public String getReasonCode() { return reasonCode; }
-    public Long getRetryAfterMs() { return retryAfterMs; }
+    public Integer getRetryAfterMs() { return retryAfterMs; }
     public List<String> getAffectedScopes() { return affectedScopes; }
 
     public boolean isAllowed() { return decision == Decision.ALLOW || decision == Decision.ALLOW_WITH_CAPS; }

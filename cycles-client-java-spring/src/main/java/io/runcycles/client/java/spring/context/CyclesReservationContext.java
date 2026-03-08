@@ -1,5 +1,7 @@
 package io.runcycles.client.java.spring.context;
 
+import io.runcycles.client.java.spring.model.Amount;
+import io.runcycles.client.java.spring.model.Balance;
 import io.runcycles.client.java.spring.model.Caps;
 import io.runcycles.client.java.spring.model.CyclesMetrics;
 import io.runcycles.client.java.spring.model.Decision;
@@ -16,8 +18,8 @@ public class CyclesReservationContext {
     private volatile Long expiresAtMs;
     private final List<String> affectedScopes;
     private final String scopePath;
-    private final Map<String, Object> reserved;
-    private final List<Map<String, Object>> balances;
+    private final Amount reserved;
+    private final List<Balance> balances;
 
     // Mutable fields: users can set these during guarded method execution
     // and the aspect will pick them up at commit time.
@@ -27,8 +29,8 @@ public class CyclesReservationContext {
     public CyclesReservationContext(String reservationId, long estimate,
                                    Decision decision, Caps caps, Long expiresAtMs,
                                    List<String> affectedScopes, String scopePath,
-                                   Map<String, Object> reserved,
-                                   List<Map<String, Object>> balances) {
+                                   Amount reserved,
+                                   List<Balance> balances) {
         this.reservationId = reservationId;
         this.estimate = estimate;
         this.decision = decision;
@@ -47,8 +49,8 @@ public class CyclesReservationContext {
     public Long getExpiresAtMs() { return expiresAtMs; }
     public List<String> getAffectedScopes() { return affectedScopes; }
     public String getScopePath() { return scopePath; }
-    public Map<String, Object> getReserved() { return reserved; }
-    public List<Map<String, Object>> getBalances() { return balances; }
+    public Amount getReserved() { return reserved; }
+    public List<Balance> getBalances() { return balances; }
 
     /**
      * Update the expiration timestamp after a successful heartbeat extend.

@@ -4,7 +4,7 @@ public class CyclesProtocolException extends RuntimeException {
     private final ErrorCode errorCode;
     private final String reasonCode;
     private final int httpStatus;
-    private final Long retryAfterMs;
+    private final Integer retryAfterMs;
 
     public CyclesProtocolException(String message) {
         this(message, null, null, -1, null);
@@ -15,7 +15,7 @@ public class CyclesProtocolException extends RuntimeException {
     }
 
     public CyclesProtocolException(String message, ErrorCode errorCode, String reasonCode,
-                                   int httpStatus, Long retryAfterMs) {
+                                   int httpStatus, Integer retryAfterMs) {
         super(message);
         this.errorCode = errorCode;
         this.reasonCode = reasonCode;
@@ -26,7 +26,7 @@ public class CyclesProtocolException extends RuntimeException {
     public ErrorCode getErrorCode() { return errorCode; }
     public String getReasonCode() { return reasonCode; }
     public int getHttpStatus() { return httpStatus; }
-    public Long getRetryAfterMs() { return retryAfterMs; }
+    public Integer getRetryAfterMs() { return retryAfterMs; }
     public boolean isBudgetExceeded() { return errorCode == ErrorCode.BUDGET_EXCEEDED; }
     public boolean isOverdraftLimitExceeded() { return errorCode == ErrorCode.OVERDRAFT_LIMIT_EXCEEDED; }
     public boolean isDebtOutstanding() { return errorCode == ErrorCode.DEBT_OUTSTANDING; }

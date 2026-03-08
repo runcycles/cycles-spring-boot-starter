@@ -1,6 +1,6 @@
 package io.runcycles.client.java.spring.client;
 
-import io.runcycles.client.java.spring.model.CyclesResponse;
+import io.runcycles.client.java.spring.model.*;
 
 import java.util.Map;
 
@@ -26,4 +26,30 @@ public interface CyclesClient {
 
     // Optional: post-only accounting event (no reservation)
     CyclesResponse<Map<String, Object>> createEvent(Object body);
+
+    // ---- Typed request DTO overloads ----
+
+    default CyclesResponse<Map<String, Object>> createReservation(ReservationCreateRequest request) {
+        return createReservation((Object) request.toMap());
+    }
+
+    default CyclesResponse<Map<String, Object>> commitReservation(String reservationId, CommitRequest request) {
+        return commitReservation(reservationId, (Object) request.toMap());
+    }
+
+    default CyclesResponse<Map<String, Object>> releaseReservation(String reservationId, ReleaseRequest request) {
+        return releaseReservation(reservationId, (Object) request.toMap());
+    }
+
+    default CyclesResponse<Map<String, Object>> extendReservation(String reservationId, ReservationExtendRequest request) {
+        return extendReservation(reservationId, (Object) request.toMap());
+    }
+
+    default CyclesResponse<Map<String, Object>> decide(DecisionRequest request) {
+        return decide((Object) request.toMap());
+    }
+
+    default CyclesResponse<Map<String, Object>> createEvent(EventCreateRequest request) {
+        return createEvent((Object) request.toMap());
+    }
 }

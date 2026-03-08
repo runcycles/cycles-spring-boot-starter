@@ -26,8 +26,8 @@ public class Caps {
         return new Caps(
                 map.get("max_tokens") instanceof Number n ? n.intValue() : null,
                 map.get("max_steps_remaining") instanceof Number n ? n.intValue() : null,
-                map.get("tool_allowlist") instanceof List<?> l ? (List<String>) l : List.of(),
-                map.get("tool_denylist") instanceof List<?> l ? (List<String>) l : List.of(),
+                map.get("tool_allowlist") instanceof List<?> l ? (List<String>) l : null,
+                map.get("tool_denylist") instanceof List<?> l ? (List<String>) l : null,
                 map.get("cooldown_ms") instanceof Number n ? n.intValue() : null
         );
     }

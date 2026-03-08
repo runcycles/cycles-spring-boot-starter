@@ -1,7 +1,6 @@
 package io.runcycles.client.java.spring.model;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * Typed result returned by {@code @Cycles(dryRun=true)} annotated methods
@@ -15,21 +14,24 @@ public class DryRunResult {
     private final Caps caps;
     private final List<String> affectedScopes;
     private final String scopePath;
-    private final Map<String, Object> reserved;
-    private final List<Map<String, Object>> balances;
-    private final Long retryAfterMs;
+    private final Amount reserved;
+    private final List<Balance> balances;
+    private final String reasonCode;
+    private final Integer retryAfterMs;
 
     public DryRunResult(Decision decision, Caps caps,
                         List<String> affectedScopes, String scopePath,
-                        Map<String, Object> reserved,
-                        List<Map<String, Object>> balances,
-                        Long retryAfterMs) {
+                        Amount reserved,
+                        List<Balance> balances,
+                        String reasonCode,
+                        Integer retryAfterMs) {
         this.decision = decision;
         this.caps = caps;
         this.affectedScopes = affectedScopes;
         this.scopePath = scopePath;
         this.reserved = reserved;
         this.balances = balances;
+        this.reasonCode = reasonCode;
         this.retryAfterMs = retryAfterMs;
     }
 
@@ -37,9 +39,10 @@ public class DryRunResult {
     public Caps getCaps() { return caps; }
     public List<String> getAffectedScopes() { return affectedScopes; }
     public String getScopePath() { return scopePath; }
-    public Map<String, Object> getReserved() { return reserved; }
-    public List<Map<String, Object>> getBalances() { return balances; }
-    public Long getRetryAfterMs() { return retryAfterMs; }
+    public Amount getReserved() { return reserved; }
+    public List<Balance> getBalances() { return balances; }
+    public String getReasonCode() { return reasonCode; }
+    public Integer getRetryAfterMs() { return retryAfterMs; }
 
     public boolean isAllowed() { return decision == Decision.ALLOW || decision == Decision.ALLOW_WITH_CAPS; }
     public boolean hasCaps() { return caps != null; }
@@ -50,6 +53,7 @@ public class DryRunResult {
                 ", caps=" + caps +
                 ", affectedScopes=" + affectedScopes +
                 ", scopePath='" + scopePath + '\'' +
+                ", reasonCode='" + reasonCode + '\'' +
                 ", balances=" + (balances != null ? balances.size() + " entries" : "null") +
                 ", retryAfterMs=" + retryAfterMs + '}';
     }
