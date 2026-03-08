@@ -31,16 +31,26 @@ public class CyclesLifecycleService {
                                   CommitRetryEngine retryEngine,
                                   CyclesRequestBuilderService requestBuilderService,
                                   CyclesExpressionEvaluator evaluator) {
+        this(client, retryEngine, requestBuilderService, evaluator,
+                Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r);
+                    t.setDaemon(true);
+                    t.setName("cycles-heartbeat");
+                    return t;
+                }));
+    }
+
+    // Visible for testing
+    CyclesLifecycleService(CyclesClient client,
+                           CommitRetryEngine retryEngine,
+                           CyclesRequestBuilderService requestBuilderService,
+                           CyclesExpressionEvaluator evaluator,
+                           ScheduledExecutorService heartbeatExecutor) {
         this.client = client;
         this.retryEngine = retryEngine;
         this.requestBuilderService = requestBuilderService;
         this.evaluator = evaluator;
-        this.heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r);
-            t.setDaemon(true);
-            t.setName("cycles-heartbeat");
-            return t;
-        });
+        this.heartbeatExecutor = heartbeatExecutor;
     }
 
     /**
