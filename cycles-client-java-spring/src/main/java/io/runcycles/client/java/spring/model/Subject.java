@@ -29,6 +29,27 @@ public class Subject {
         this.dimensions = dimensions;
     }
 
+    public static Builder builder() { return new Builder(); }
+
+    public static class Builder {
+        private String tenant;
+        private String workspace;
+        private String app;
+        private String workflow;
+        private String agent;
+        private String toolset;
+        private Map<String, String> dimensions;
+
+        public Builder tenant(String tenant) { this.tenant = tenant; return this; }
+        public Builder workspace(String workspace) { this.workspace = workspace; return this; }
+        public Builder app(String app) { this.app = app; return this; }
+        public Builder workflow(String workflow) { this.workflow = workflow; return this; }
+        public Builder agent(String agent) { this.agent = agent; return this; }
+        public Builder toolset(String toolset) { this.toolset = toolset; return this; }
+        public Builder dimensions(Map<String, String> dimensions) { this.dimensions = dimensions; return this; }
+        public Subject build() { return new Subject(tenant, workspace, app, workflow, agent, toolset, dimensions); }
+    }
+
     @SuppressWarnings("unchecked")
     public static Subject fromMap(Map<String, Object> map) {
         if (map == null) return null;
