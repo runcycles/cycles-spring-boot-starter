@@ -66,24 +66,24 @@ public String generateText(String prompt, int tokens) { ... }
 ### The Reserve / Commit / Release Lifecycle
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  @Cycles method invocation                                   │
-│                                                              │
-│  1. Evaluate estimate expression → Amount(unit, amount)      │
-│  2. POST /v1/reservations                                    │
-│     ├─ 409 (BUDGET_EXCEEDED / OVERDRAFT / DEBT)              │
-│     │   → throw CyclesProtocolException (method never runs)  │
-│     ├─ 200 ALLOW → reservation created, continue             │
-│     └─ 200 ALLOW_WITH_CAPS → Caps available via context      │
-│  3. Start heartbeat (POST .../extend at ttlMs/2 intervals)  │
-│  4. Execute the guarded method                               │
-│     ├─ Success → evaluate actual expression                  │
-│     │            POST /v1/reservations/{reservation_id}/commit            │
-│     │            (retries on transient failure)               │
-│     └─ Failure → POST /v1/reservations/{reservation_id}/release          │
-│  5. Cancel heartbeat, clear CyclesContextHolder              │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  @Cycles method invocation                                      │
+│                                                                 │
+│  1. Evaluate estimate expression → Amount(unit, amount)         │
+│  2. POST /v1/reservations                                       │
+│     ├─ 409 (BUDGET_EXCEEDED / OVERDRAFT / DEBT)                 │
+│     │   → throw CyclesProtocolException (method never runs)     │
+│     ├─ 200 ALLOW → reservation created, continue                │
+│     └─ 200 ALLOW_WITH_CAPS → Caps available via context         │
+│  3. Start heartbeat (POST .../extend at ttlMs/2 intervals)      │
+│  4. Execute the guarded method                                  │
+│     ├─ Success → evaluate actual expression                     │
+│     │    POST /v1/reservations/{reservation_id}/commit          │
+│     │            (retries on transient failure)                 │
+│     └─ Failure → POST /v1/reservations/{reservation_id}/release │
+│  5. Cancel heartbeat, clear CyclesContextHolder                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Decisions
