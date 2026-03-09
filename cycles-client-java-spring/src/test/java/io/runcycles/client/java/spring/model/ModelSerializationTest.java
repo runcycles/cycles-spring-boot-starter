@@ -584,5 +584,457 @@ class ModelSerializationTest {
             assertThat(CommitOveragePolicy.fromString("ALLOW_IF_AVAILABLE")).isEqualTo(CommitOveragePolicy.ALLOW_IF_AVAILABLE);
             assertThat(CommitOveragePolicy.fromString("ALLOW_WITH_OVERDRAFT")).isEqualTo(CommitOveragePolicy.ALLOW_WITH_OVERDRAFT);
         }
+
+        // --- Null/blank/unknown coverage for all enums ---
+
+        @Test
+        void enumFromStringWithNull() {
+            assertThat(Unit.fromString(null)).isNull();
+            assertThat(Decision.fromString(null)).isNull();
+            assertThat(ErrorCode.fromString(null)).isNull();
+            assertThat(CommitOveragePolicy.fromString(null)).isNull();
+            assertThat(CommitStatus.fromString(null)).isNull();
+            assertThat(EventStatus.fromString(null)).isNull();
+            assertThat(ExtendStatus.fromString(null)).isNull();
+            assertThat(ReservationStatus.fromString(null)).isNull();
+            assertThat(ReleaseStatus.fromString(null)).isNull();
+        }
+
+        @Test
+        void enumFromStringWithUnknownValue() {
+            assertThat(Unit.fromString("UNKNOWN_UNIT")).isNull();
+            assertThat(Decision.fromString("THROTTLE")).isNull();
+            assertThat(CommitOveragePolicy.fromString("MAYBE")).isNull();
+            assertThat(CommitStatus.fromString("PENDING")).isNull();
+            assertThat(EventStatus.fromString("REJECTED")).isNull();
+            assertThat(ExtendStatus.fromString("EXPIRED")).isNull();
+            assertThat(ReservationStatus.fromString("UNKNOWN")).isNull();
+            assertThat(ReleaseStatus.fromString("PENDING")).isNull();
+        }
+
+        @Test
+        void commitStatusFromString() {
+            assertThat(CommitStatus.fromString("COMMITTED")).isEqualTo(CommitStatus.COMMITTED);
+        }
+
+        @Test
+        void eventStatusFromString() {
+            assertThat(EventStatus.fromString("APPLIED")).isEqualTo(EventStatus.APPLIED);
+        }
+
+        @Test
+        void extendStatusFromString() {
+            assertThat(ExtendStatus.fromString("ACTIVE")).isEqualTo(ExtendStatus.ACTIVE);
+        }
+
+        @Test
+        void reservationStatusFromString() {
+            assertThat(ReservationStatus.fromString("ACTIVE")).isEqualTo(ReservationStatus.ACTIVE);
+            assertThat(ReservationStatus.fromString("COMMITTED")).isEqualTo(ReservationStatus.COMMITTED);
+            assertThat(ReservationStatus.fromString("RELEASED")).isEqualTo(ReservationStatus.RELEASED);
+            assertThat(ReservationStatus.fromString("EXPIRED")).isEqualTo(ReservationStatus.EXPIRED);
+        }
+
+        @Test
+        void releaseStatusFromString() {
+            assertThat(ReleaseStatus.fromString("RELEASED")).isEqualTo(ReleaseStatus.RELEASED);
+        }
+
+        @Test
+        void errorCodeIsRetryable() {
+            assertThat(ErrorCode.INTERNAL_ERROR.isRetryable()).isTrue();
+            assertThat(ErrorCode.UNKNOWN.isRetryable()).isTrue();
+            assertThat(ErrorCode.BUDGET_EXCEEDED.isRetryable()).isFalse();
+            assertThat(ErrorCode.INVALID_REQUEST.isRetryable()).isFalse();
+        }
+    }
+
+    // ========================================================================
+    // Action (toMap/fromMap)
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Action (toMap/fromMap)")
+    class ActionTest {
+
+        @Test
+        void shouldRoundTrip() {
+            Action original = new Action("llm.completion", "gpt-4", List.of("prod", "billing"));
+            Map<String, Object> map = original.toMap();
+            Action restored = Action.fromMap(map);
+
+            assertThat(restored.getKind()).isEqualTo("llm.completion");
+            assertThat(restored.getName()).isEqualTo("gpt-4");
+            assertThat(restored.getTags()).containsExactly("prod", "billing");
+        }
+
+        @Test
+        void shouldOmitNullFields() {
+            Action action = new Action("kind", null, null);
+            Map<String, Object> map = action.toMap();
+
+            assertThat(map).containsKey("kind");
+            assertThat(map).doesNotContainKey("name");
+            assertThat(map).doesNotContainKey("tags");
+        }
+
+        @Test
+        void fromMapWithNull() {
+            assertThat(Action.fromMap(null)).isNull();
+        }
+
+        @Test
+        void fromMapWithMissingFields() {
+            Action action = Action.fromMap(Map.of());
+            assertThat(action.getKind()).isNull();
+            assertThat(action.getName()).isNull();
+            assertThat(action.getTags()).isNull();
+        }
+    }
+
+    // ========================================================================
+    // Caps (fromMap)
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Caps (fromMap)")
+    class CapsTest {
+
+        @Test
+        void shouldDeserializeAllFields() {
+            Map<String, Object> raw = Map.of(
+                    "max_tokens", 500,
+                    "max_steps_remaining", 10,
+                    "tool_allowlist", List.of("search", "compute"),
+                    "tool_denylist", List.of("admin"),
+                    "cooldown_ms", 2000
+            );
+
+            Caps caps = Caps.fromMap(raw);
+
+            assertThat(caps.getMaxTokens()).isEqualTo(500);
+            assertThat(caps.getMaxStepsRemaining()).isEqualTo(10);
+            assertThat(caps.getToolAllowlist()).containsExactly("search", "compute");
+            assertThat(caps.getToolDenylist()).containsExactly("admin");
+            assertThat(caps.getCooldownMs()).isEqualTo(2000);
+        }
+
+        @Test
+        void fromMapWithNull() {
+            assertThat(Caps.fromMap(null)).isNull();
+        }
+
+        @Test
+        void fromMapWithEmptyMap() {
+            Caps caps = Caps.fromMap(Map.of());
+            assertThat(caps.getMaxTokens()).isNull();
+            assertThat(caps.getMaxStepsRemaining()).isNull();
+            assertThat(caps.getToolAllowlist()).isNull();
+            assertThat(caps.getToolDenylist()).isNull();
+            assertThat(caps.getCooldownMs()).isNull();
+        }
+
+        @Test
+        void isToolAllowedWithAllowlist() {
+            Caps caps = Caps.fromMap(Map.of("tool_allowlist", List.of("search")));
+            assertThat(caps.isToolAllowed("search")).isTrue();
+            assertThat(caps.isToolAllowed("admin")).isFalse();
+        }
+
+        @Test
+        void isToolAllowedWithDenylist() {
+            Caps caps = Caps.fromMap(Map.of("tool_denylist", List.of("admin")));
+            assertThat(caps.isToolAllowed("search")).isTrue();
+            assertThat(caps.isToolAllowed("admin")).isFalse();
+        }
+
+        @Test
+        void isToolAllowedWithNeitherList() {
+            Caps caps = Caps.fromMap(Map.of());
+            assertThat(caps.isToolAllowed("anything")).isTrue();
+        }
+    }
+
+    // ========================================================================
+    // SignedAmount (fromMap)
+    // ========================================================================
+
+    @Nested
+    @DisplayName("SignedAmount (fromMap)")
+    class SignedAmountTest {
+
+        @Test
+        void shouldDeserializePositive() {
+            Map<String, Object> raw = Map.of("unit", "TOKENS", "amount", 500);
+            SignedAmount sa = SignedAmount.fromMap(raw);
+            assertThat(sa.getUnit()).isEqualTo(Unit.TOKENS);
+            assertThat(sa.getAmount()).isEqualTo(500L);
+        }
+
+        @Test
+        void shouldDeserializeNegative() {
+            Map<String, Object> raw = Map.of("unit", "TOKENS", "amount", -500);
+            SignedAmount sa = SignedAmount.fromMap(raw);
+            assertThat(sa.getAmount()).isEqualTo(-500L);
+        }
+
+        @Test
+        void fromMapWithNull() {
+            assertThat(SignedAmount.fromMap(null)).isNull();
+        }
+
+        @Test
+        void fromMapWithMissingFields() {
+            SignedAmount sa = SignedAmount.fromMap(Map.of());
+            assertThat(sa.getUnit()).isNull();
+            assertThat(sa.getAmount()).isEqualTo(0L);
+        }
+    }
+
+    // ========================================================================
+    // Response DTOs — fromMap() with null
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Response DTOs null handling")
+    class ResponseDtoNullHandling {
+
+        @Test
+        void commitResultFromNull() {
+            assertThat(CommitResult.fromMap(null)).isNull();
+        }
+
+        @Test
+        void releaseResultFromNull() {
+            assertThat(ReleaseResult.fromMap(null)).isNull();
+        }
+
+        @Test
+        void decisionResultFromNull() {
+            assertThat(DecisionResult.fromMap(null)).isNull();
+        }
+
+        @Test
+        void eventResultFromNull() {
+            assertThat(EventResult.fromMap(null)).isNull();
+        }
+
+        @Test
+        void extendResultFromNull() {
+            assertThat(ExtendResult.fromMap(null)).isNull();
+        }
+
+        @Test
+        void errorResponseFromNull() {
+            assertThat(ErrorResponse.fromMap(null)).isNull();
+        }
+
+        @Test
+        void balanceQueryResultFromNull() {
+            assertThat(BalanceQueryResult.fromMap(null)).isNull();
+        }
+
+        @Test
+        void balanceFromNull() {
+            assertThat(Balance.fromMap(null)).isNull();
+        }
+
+        @Test
+        void amountFromNull() {
+            assertThat(Amount.fromMap(null)).isNull();
+        }
+
+        @Test
+        void subjectFromNull() {
+            assertThat(Subject.fromMap(null)).isNull();
+        }
+    }
+
+    // ========================================================================
+    // ReservationSummaryResult (fromMap)
+    // ========================================================================
+
+    @Nested
+    @DisplayName("ReservationSummaryResult (fromMap)")
+    class ReservationSummaryResultTest {
+
+        @Test
+        void shouldDeserializeAllFields() {
+            Map<String, Object> raw = Map.ofEntries(
+                    Map.entry("reservation_id", "res-1"),
+                    Map.entry("status", "ACTIVE"),
+                    Map.entry("idempotency_key", "idem-1"),
+                    Map.entry("subject", Map.of("tenant", "t1")),
+                    Map.entry("action", Map.of("kind", "llm", "name", "gpt-4")),
+                    Map.entry("reserved", Map.of("unit", "TOKENS", "amount", 1000)),
+                    Map.entry("created_at_ms", 1700000000000L),
+                    Map.entry("expires_at_ms", 1700000060000L),
+                    Map.entry("scope_path", "tenant:t1"),
+                    Map.entry("affected_scopes", List.of("tenant:t1"))
+            );
+
+            ReservationSummaryResult result = ReservationSummaryResult.fromMap(raw);
+
+            assertThat(result.getReservationId()).isEqualTo("res-1");
+            assertThat(result.getStatus()).isEqualTo(ReservationStatus.ACTIVE);
+            assertThat(result.isActive()).isTrue();
+            assertThat(result.isCommitted()).isFalse();
+        }
+
+        @Test
+        void fromMapWithNull() {
+            assertThat(ReservationSummaryResult.fromMap(null)).isNull();
+        }
+    }
+
+    // ========================================================================
+    // ReservationDetailResult (fromMap)
+    // ========================================================================
+
+    @Nested
+    @DisplayName("ReservationDetailResult (fromMap)")
+    class ReservationDetailResultTest {
+
+        @Test
+        void shouldDeserializeAllFields() {
+            Map<String, Object> raw = Map.ofEntries(
+                    Map.entry("reservation_id", "res-1"),
+                    Map.entry("status", "COMMITTED"),
+                    Map.entry("idempotency_key", "idem-1"),
+                    Map.entry("subject", Map.of("tenant", "t1")),
+                    Map.entry("action", Map.of("kind", "llm", "name", "gpt-4")),
+                    Map.entry("reserved", Map.of("unit", "TOKENS", "amount", 1000)),
+                    Map.entry("committed", Map.of("unit", "TOKENS", "amount", 800)),
+                    Map.entry("created_at_ms", 1700000000000L),
+                    Map.entry("expires_at_ms", 1700000060000L),
+                    Map.entry("finalized_at_ms", 1700000050000L),
+                    Map.entry("scope_path", "tenant:t1"),
+                    Map.entry("affected_scopes", List.of("tenant:t1")),
+                    Map.entry("metadata", Map.of("key", "value"))
+            );
+
+            ReservationDetailResult result = ReservationDetailResult.fromMap(raw);
+
+            assertThat(result.getReservationId()).isEqualTo("res-1");
+            assertThat(result.getStatus()).isEqualTo(ReservationStatus.COMMITTED);
+            assertThat(result.isCommitted()).isTrue();
+            assertThat(result.isActive()).isFalse();
+            assertThat(result.getCommitted().getAmount()).isEqualTo(800L);
+            assertThat(result.getFinalizedAtMs()).isEqualTo(1700000050000L);
+            assertThat(result.getMetadata()).containsEntry("key", "value");
+        }
+
+        @Test
+        void fromMapWithNull() {
+            assertThat(ReservationDetailResult.fromMap(null)).isNull();
+        }
+    }
+
+    // ========================================================================
+    // ReservationListResult (fromMap)
+    // ========================================================================
+
+    @Nested
+    @DisplayName("ReservationListResult (fromMap)")
+    class ReservationListResultTest {
+
+        @Test
+        void shouldDeserializeWithReservations() {
+            Map<String, Object> raw = Map.of(
+                    "reservations", List.of(
+                            Map.of("reservation_id", "res-1", "status", "ACTIVE",
+                                    "affected_scopes", List.of("tenant:t1")),
+                            Map.of("reservation_id", "res-2", "status", "COMMITTED",
+                                    "affected_scopes", List.of("tenant:t1"))
+                    ),
+                    "has_more", true,
+                    "next_cursor", "cursor-xyz"
+            );
+
+            ReservationListResult result = ReservationListResult.fromMap(raw);
+
+            assertThat(result.getReservations()).hasSize(2);
+            assertThat(result.getHasMore()).isTrue();
+            assertThat(result.getNextCursor()).isEqualTo("cursor-xyz");
+        }
+
+        @Test
+        void fromMapWithNull() {
+            assertThat(ReservationListResult.fromMap(null)).isNull();
+        }
+
+        @Test
+        void fromMapWithEmptyReservations() {
+            Map<String, Object> raw = Map.of("reservations", List.of());
+            ReservationListResult result = ReservationListResult.fromMap(raw);
+            assertThat(result.getReservations()).isEmpty();
+            assertThat(result.getHasMore()).isFalse();
+            assertThat(result.getNextCursor()).isNull();
+        }
+    }
+
+    // ========================================================================
+    // DryRunResult
+    // ========================================================================
+
+    @Nested
+    @DisplayName("DryRunResult")
+    class DryRunResultTest {
+
+        @Test
+        void shouldExposeAllFields() {
+            var dryRun = new DryRunResult(
+                    Decision.ALLOW_WITH_CAPS,
+                    Caps.fromMap(Map.of("max_tokens", 100)),
+                    List.of("tenant:t1"),
+                    "tenant:t1",
+                    new Amount(Unit.TOKENS, 500),
+                    List.of(),
+                    "APPROACHING_LIMIT",
+                    3000
+            );
+
+            assertThat(dryRun.getDecision()).isEqualTo(Decision.ALLOW_WITH_CAPS);
+            assertThat(dryRun.isAllowed()).isTrue();
+            assertThat(dryRun.hasCaps()).isTrue();
+            assertThat(dryRun.getCaps().getMaxTokens()).isEqualTo(100);
+            assertThat(dryRun.getAffectedScopes()).containsExactly("tenant:t1");
+            assertThat(dryRun.getScopePath()).isEqualTo("tenant:t1");
+            assertThat(dryRun.getReserved().getAmount()).isEqualTo(500L);
+            assertThat(dryRun.getReasonCode()).isEqualTo("APPROACHING_LIMIT");
+            assertThat(dryRun.getRetryAfterMs()).isEqualTo(3000);
+        }
+
+        @Test
+        void denyIsNotAllowed() {
+            var dryRun = new DryRunResult(Decision.DENY, null, List.of(), null, null, null, null, null);
+            assertThat(dryRun.isAllowed()).isFalse();
+            assertThat(dryRun.hasCaps()).isFalse();
+        }
+    }
+
+    // ========================================================================
+    // CyclesMetrics extended
+    // ========================================================================
+
+    @Nested
+    @DisplayName("CyclesMetrics (extended)")
+    class CyclesMetricsExtendedTest {
+
+        @Test
+        void shouldBeNonEmptyWithOnlyCustomMetrics() {
+            var metrics = new CyclesMetrics();
+            metrics.putCustom("hit_rate", 0.95);
+            assertThat(metrics.isEmpty()).isFalse();
+        }
+
+        @Test
+        void toMapShouldOmitCustomWhenEmpty() {
+            var metrics = new CyclesMetrics();
+            metrics.setLatencyMs(100);
+            Map<String, Object> map = metrics.toMap();
+            assertThat(map).doesNotContainKey("custom");
+            assertThat(map.get("latency_ms")).isEqualTo(100);
+        }
     }
 }

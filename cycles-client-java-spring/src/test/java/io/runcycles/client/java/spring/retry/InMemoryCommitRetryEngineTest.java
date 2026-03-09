@@ -173,4 +173,36 @@ class InMemoryCommitRetryEngineTest {
                     .untilAsserted(() -> verify(client, times(3)).commitReservation(eq("res-1"), any(Object.class)));
         }
     }
+
+    // ========================================================================
+    // Max delay capping
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Max delay capping")
+    class MaxDelayCapping {
+
+        @Test
+        void shouldCapDelayAtMaxDelay() {
+            // Configure so delay quickly exceeds maxDelay:
+            // initialDelay=100ms, multiplier=10.0, maxDelay=200ms
+            // Attempt 1: 100ms, Attempt 2: min(1000ms, 200ms) = 200ms, Attempt 3: min(2000ms, 200ms) = 200ms
+            CyclesProperties.Retry retry = properties.getRetry();
+            retry.setMaxAttempts(4);
+            retry.setInitialDelay(Duration.ofMillis(100));
+            retry.setMultiplier(10.0);
+            retry.setMaxDelay(Duration.ofMillis(200));
+
+            when(client.commitReservation(eq("res-1"), any(Object.class)))
+                    .thenReturn(CyclesResponse.transportError(new RuntimeException("always fail")));
+
+            InMemoryCommitRetryEngine engine = new InMemoryCommitRetryEngine(client, properties);
+            engine.schedule("res-1", Map.of("idempotency_key", "com-1"));
+
+            // All 4 attempts should complete within ~700ms (100 + 200 + 200 + 200)
+            // Without capping, attempt 2 would be at 1000ms, attempt 3 at 10000ms
+            await().atMost(3, TimeUnit.SECONDS)
+                    .untilAsserted(() -> verify(client, times(4)).commitReservation(eq("res-1"), any(Object.class)));
+        }
+    }
 }

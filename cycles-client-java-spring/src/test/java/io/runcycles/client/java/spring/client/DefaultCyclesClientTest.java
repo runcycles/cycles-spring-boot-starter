@@ -340,5 +340,85 @@ class DefaultCyclesClientTest {
             RecordedRequest req = server.takeRequest();
             assertThat(req.getHeader("X-Idempotency-Key")).isNull();
         }
+
+        @Test
+        void shouldExtractFromPojoViaReflection() throws Exception {
+            enqueueJson(200, Map.of("decision", "ALLOW"));
+
+            // POJO with getIdempotencyKey() method
+            var pojo = new Object() {
+                @SuppressWarnings("unused")
+                public String getIdempotencyKey() { return "pojo-key-456"; }
+            };
+            client.createReservation(pojo);
+
+            RecordedRequest req = server.takeRequest();
+            assertThat(req.getHeader("X-Idempotency-Key")).isEqualTo("pojo-key-456");
+        }
+
+        @Test
+        void shouldReturnNullWhenPojoHasNoIdempotencyKeyGetter() throws Exception {
+            enqueueJson(200, Map.of("decision", "ALLOW"));
+
+            var pojo = new Object() {
+                @SuppressWarnings("unused")
+                public String getName() { return "test"; }
+            };
+            client.createReservation(pojo);
+
+            RecordedRequest req = server.takeRequest();
+            assertThat(req.getHeader("X-Idempotency-Key")).isNull();
+        }
+    }
+
+    // ========================================================================
+    // Error message fallback paths
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Error message fallback paths")
+    class ErrorMessageFallback {
+
+        @Test
+        void shouldFallbackToErrorFieldWhenNoStructuredMessage() throws Exception {
+            // Response with "error" key but no structured ErrorResponse message
+            enqueueJson(400, Map.of("error", "INVALID_REQUEST"));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(
+                    Map.of("idempotency_key", "x"));
+
+            assertThat(resp.is2xx()).isFalse();
+            assertThat(resp.getErrorMessage()).isEqualTo("INVALID_REQUEST");
+        }
+
+        @Test
+        void shouldFallbackToHttpStatusWhenNoErrorInfo() throws Exception {
+            // Response with no error or message fields
+            enqueueJson(418, Map.of("something", "unrelated"));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(
+                    Map.of("idempotency_key", "x"));
+
+            assertThat(resp.is2xx()).isFalse();
+            assertThat(resp.getErrorMessage()).isEqualTo("HTTP 418");
+        }
+    }
+
+    // ========================================================================
+    // GET transport error
+    // ========================================================================
+
+    @Nested
+    @DisplayName("GET transport error")
+    class GetTransportError {
+
+        @Test
+        void shouldHandleGetTransportError() {
+            try { server.shutdown(); } catch (Exception e) { /* ignore */ }
+
+            CyclesResponse<Map<String, Object>> resp = client.getReservation("res-1");
+
+            assertThat(resp.isTransportError()).isTrue();
+        }
     }
 }

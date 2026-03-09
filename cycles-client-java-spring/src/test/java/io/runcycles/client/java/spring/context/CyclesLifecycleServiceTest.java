@@ -1098,4 +1098,258 @@ class CyclesLifecycleServiceTest {
             assertThat(result).isEqualTo("ok");
         }
     }
+
+    // ========================================================================
+    // Null decision from server
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Null decision")
+    class NullDecision {
+
+        @Test
+        void shouldThrowOnUnrecognizedDecision() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+
+            // Server returns unrecognized decision string like "THROTTLE"
+            Map<String, Object> response = new HashMap<>();
+            response.put("decision", "THROTTLE");
+            response.put("reservation_id", "res-throttle");
+            response.put("affected_scopes", List.of("tenant:test-tenant"));
+
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, response));
+
+            assertThatThrownBy(() -> service.executeWithReservation(
+                    () -> "nope",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            ))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("Unrecognized decision");
+        }
+    }
+
+    // ========================================================================
+    // Null ReservationResult (unparseable response)
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Null ReservationResult")
+    class NullReservationResult {
+
+        @Test
+        void shouldThrowWhenReservationResultCannotBeParsed() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+
+            // Return a 2xx response with null body -> ReservationResult.fromMap(null) returns null
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, null));
+
+            assertThatThrownBy(() -> service.executeWithReservation(
+                    () -> "nope",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            ))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("parse reservation response");
+        }
+    }
+
+    // ========================================================================
+    // Release failure paths
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Release failure handling")
+    class ReleaseFailure {
+
+        @Test
+        void shouldHandleReleaseHttpError() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-relfail")));
+            when(requestBuilderService.buildRelease(anyString()))
+                    .thenReturn(Map.of("idempotency_key", "rel-1"));
+            // Release returns a non-2xx error
+            when(client.releaseReservation(eq("res-relfail"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(500, "Server error", Map.of()));
+
+            RuntimeException actionError = new RuntimeException("Action failed");
+            assertThatThrownBy(() -> service.executeWithReservation(
+                    () -> { throw actionError; },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            ))
+                    .isSameAs(actionError);
+
+            // Release was attempted even though it failed
+            verify(client).releaseReservation(eq("res-relfail"), any(Object.class));
+        }
+
+        @Test
+        void shouldHandleReleaseException() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-relexc")));
+            when(requestBuilderService.buildRelease(anyString()))
+                    .thenReturn(Map.of("idempotency_key", "rel-1"));
+            // Release throws an exception
+            when(client.releaseReservation(eq("res-relexc"), any(Object.class)))
+                    .thenThrow(new RuntimeException("Network down"));
+
+            RuntimeException actionError = new RuntimeException("Action failed");
+            assertThatThrownBy(() -> service.executeWithReservation(
+                    () -> { throw actionError; },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            ))
+                    .isSameAs(actionError);
+
+            // Release was attempted even though it threw
+            verify(client).releaseReservation(eq("res-relexc"), any(Object.class));
+        }
+    }
+
+    // ========================================================================
+    // Commit RESERVATION_EXPIRED
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Commit with RESERVATION_EXPIRED")
+    class CommitReservationExpired {
+
+        @Test
+        void shouldSkipReleaseAndRetryOnReservationExpired() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-expired")));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(eq("res-expired"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(410, "Expired",
+                            Map.of("error", "RESERVATION_EXPIRED", "message", "Expired", "request_id", "r1")));
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            // Should NOT release or retry
+            verify(client, never()).releaseReservation(anyString(), any(Object.class));
+            verify(retryEngine, never()).schedule(anyString(), any());
+        }
+    }
+
+    // ========================================================================
+    // Commit with unrecognized response
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Commit with unrecognized response")
+    class CommitUnrecognizedResponse {
+
+        @Test
+        void shouldHandleNon2xxNon4xxNon5xxResponse() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-weird")));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            // Return a 3xx-ish status (unusual) - not 2xx, not transport, not 4xx, not 5xx
+            when(client.commitReservation(eq("res-weird"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(301, "Redirect", Map.of()));
+
+            // Should not throw, just log warning
+            Object result = service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+            assertThat(result).isEqualTo("ok");
+
+            // Should not release or retry for unrecognized status
+            verify(client, never()).releaseReservation(anyString(), any(Object.class));
+            verify(retryEngine, never()).schedule(anyString(), any());
+        }
+    }
+
+    // ========================================================================
+    // buildProtocolException null errorResponse fallback
+    // ========================================================================
+
+    @Nested
+    @DisplayName("buildProtocolException fallback paths")
+    class BuildProtocolExceptionFallback {
+
+        @Test
+        void shouldFallbackWhenErrorResponseIsNull() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+
+            // Error response body without structured error fields (no "error"/"message"/"request_id")
+            Map<String, Object> errorBody = new HashMap<>();
+            errorBody.put("some_field", "some_value");
+
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(503, "Service Unavailable", errorBody));
+
+            assertThatThrownBy(() -> service.executeWithReservation(
+                    () -> "nope",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            ))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("Service Unavailable");
+        }
+    }
 }

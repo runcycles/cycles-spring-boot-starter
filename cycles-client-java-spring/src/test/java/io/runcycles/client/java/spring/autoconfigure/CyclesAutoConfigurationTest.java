@@ -135,5 +135,68 @@ class CyclesAutoConfigurationTest {
                         assertThat(context).doesNotHaveBean(DefaultCyclesClient.class);
                     });
         }
+
+        @Test
+        void shouldFailOnBlankApiKey() {
+            contextRunner
+                    .withPropertyValues(
+                            "cycles.base-url=http://localhost:7878",
+                            "cycles.api-key=  "
+                    )
+                    .run(context -> {
+                        assertThat(context).hasFailed();
+                        assertThat(context.getStartupFailure())
+                                .rootCause()
+                                .isInstanceOf(IllegalStateException.class)
+                                .hasMessageContaining("api-key");
+                    });
+        }
+
+        @Test
+        void shouldAllowCustomCommitRetryEngineOverride() {
+            contextRunner
+                    .withPropertyValues(
+                            "cycles.base-url=http://localhost:7878",
+                            "cycles.api-key=test-key"
+                    )
+                    .withBean(CommitRetryEngine.class, () -> (reservationId, body) -> { /* no-op */ })
+                    .run(context -> {
+                        assertThat(context).hasSingleBean(CommitRetryEngine.class);
+                        assertThat(context).doesNotHaveBean(InMemoryCommitRetryEngine.class);
+                    });
+        }
+
+        @Test
+        void shouldAllowCustomExpressionEvaluatorOverride() {
+            contextRunner
+                    .withPropertyValues(
+                            "cycles.base-url=http://localhost:7878",
+                            "cycles.api-key=test-key"
+                    )
+                    .withBean(CyclesExpressionEvaluator.class, CyclesExpressionEvaluator::new)
+                    .run(context -> {
+                        assertThat(context).hasSingleBean(CyclesExpressionEvaluator.class);
+                    });
+        }
+
+        @Test
+        void shouldAllowCustomLifecycleServiceOverride() {
+            contextRunner
+                    .withPropertyValues(
+                            "cycles.base-url=http://localhost:7878",
+                            "cycles.api-key=test-key"
+                    )
+                    .withBean(CyclesLifecycleService.class, () -> {
+                        return new CyclesLifecycleService(
+                                new DefaultCyclesClient(org.springframework.web.reactive.function.client.WebClient.create()),
+                                (id, body) -> {},
+                                new CyclesRequestBuilderService(new CyclesValueResolutionService(java.util.Map.of(), new io.runcycles.client.java.spring.config.CyclesProperties())),
+                                new CyclesExpressionEvaluator()
+                        );
+                    })
+                    .run(context -> {
+                        assertThat(context).hasSingleBean(CyclesLifecycleService.class);
+                    });
+        }
     }
 }
