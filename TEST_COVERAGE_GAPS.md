@@ -15,7 +15,7 @@
 | `CyclesValueResolutionService` | `CyclesValueResolutionServiceTest` | 14 | Excellent | Priority chain, config mapping, resolver integration |
 | `InMemoryCommitRetryEngine` | `InMemoryCommitRetryEngineTest` | 7 | Very Good | Retry flows, max delay capping covered; shutdown/concurrency untested |
 | `CyclesAutoConfiguration` | `CyclesAutoConfigurationTest` | 8 | Very Good | Bean creation, validation, 4 ConditionalOnMissingBean overrides tested |
-| `CyclesRequestBuilderService` | `CyclesRequestBuilderServiceTest` | 30 | Excellent | All builders, field length validation, edge cases, tags covered |
+| `CyclesRequestBuilderService` | `CyclesRequestBuilderServiceTest` | 30 | Very Good | All builders, field length validation, edge cases, tags covered; some parameter combos missing |
 | `CyclesContextHolder` | `CyclesContextHolderTest` | 11 | Excellent | Complete coverage |
 | `CyclesResponse` | `CyclesResponseTest` | 16 | Excellent | Thorough boundary and factory testing |
 | `ValidationUtils` | `ValidationUtilsTest` | 15 | Excellent | Complete branch coverage |
@@ -67,30 +67,43 @@ The following gaps identified in the prior audit have been fully addressed:
 - `shutdown()` / cleanup behavior
 - Retry-after-ms from server response being respected
 
-### 3. CyclesLifecycleService — LOW priority
+### 3. CyclesRequestBuilderService — LOW priority
+
+30 tests cover all builder methods. Remaining minor gaps:
+
+- `buildReservation` with `ttlMs <= 0` (field should be omitted)
+- `buildReservation` with `gracePeriodMs < 0` (field should be omitted)
+- `buildEvent` with non-null metrics and metadata parameters
+- `buildDecision` with non-null metadata parameter
+- `buildExtend` with non-null metadata parameter
+- `buildCommit` with non-null but empty `CyclesMetrics` (isEmpty guard)
+
+### 4. CyclesLifecycleService — LOW priority
 
 35 tests provide comprehensive lifecycle coverage. Remaining minor gaps:
 
 - `commitMetadata` passthrough from annotation to commit request
-- `useEstimateIfActualNotProvided=true` path (estimate alone used successfully)
+- Explicit test for `useEstimateIfActualNotProvided=true` fallback (implicitly covered but no named test)
+- Heartbeat extend succeeding but `expires_at_ms` missing from response body
+- `metrics.getLatencyMs()` already non-null (latency not overwritten branch)
 - Concurrent `@Cycles`-annotated calls (thread isolation under load)
 
-### 4. DefaultCyclesClient — LOW priority
+### 5. DefaultCyclesClient — LOW priority
 
 20 tests cover all endpoints and error paths. Remaining:
 
+- POJO `getIdempotencyKey()` getter returning null (vs. no getter)
 - Request body JSON serialization verification (asserting exact body content sent to MockWebServer)
 - Connection/read timeout behavior under slow responses
-- Custom header passthrough beyond `X-Idempotency-Key` and `X-Cycles-API-Key`
 
-### 5. CyclesExpressionEvaluator — LOW priority
+### 6. CyclesExpressionEvaluator — LOW priority
 
 14 tests cover SpEL evaluation thoroughly. Remaining:
 
 - Expression evaluating to non-numeric type (e.g., returns a String)
 - Very large numbers / overflow edge cases
 
-### 6. Integration/E2E Testing — NOT PRESENT
+### 7. Integration/E2E Testing — NOT PRESENT
 
 No integration tests exist. These would provide value but are not required for unit coverage:
 
