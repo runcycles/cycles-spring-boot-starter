@@ -1,147 +1,98 @@
 # Test Coverage Gap Analysis
 
-## Current State: 12 test classes covering ~150 tests across all major components
+## Current State: 14 test classes, 240 @Test methods (275 test executions), all passing
 
 **Last audited:** 2026-03-09
 
 ## Coverage Summary
 
-| Source Class | Test Class | Assessment | Notes |
-|---|---|---|---|
-| `CyclesLifecycleService` | `CyclesLifecycleServiceTest` (24 tests) | Good | Core lifecycle paths covered; error branches missing |
-| `CyclesAspect` | `CyclesAspectTest` (5 tests) | Excellent | All branches covered for this thin adapter |
-| `DefaultCyclesClient` | `DefaultCyclesClientTest` (14 tests) | Good | All endpoints tested; reflection path and error parsing gaps |
-| `CyclesExpressionEvaluator` | `CyclesExpressionEvaluatorTest` (9 tests) | Good | Core SpEL tested; #target, invalid expressions, zero boundary missing |
-| `CyclesValueResolutionService` | `CyclesValueResolutionServiceTest` (12 tests) | Excellent | Priority chain tested; only resolver error edge cases missing |
-| `InMemoryCommitRetryEngine` | `InMemoryCommitRetryEngineTest` (6 tests) | Good | Retry flows tested; delay cap branch never triggered |
-| `CyclesAutoConfiguration` | `CyclesAutoConfigurationTest` (5 tests) | Adequate | Bean creation and validation tested; 6/7 ConditionalOnMissingBean overrides untested |
-| `CyclesRequestBuilderService` | `CyclesRequestBuilderServiceTest` (18 tests) | Good | Builders tested; field length validation and some error paths missing |
-| `CyclesContextHolder` | `CyclesContextHolderTest` (11 tests) | Excellent | Complete coverage |
-| `CyclesResponse` | `CyclesResponseTest` (14 tests) | Excellent | Thorough boundary testing |
-| `ValidationUtils` | `ValidationUtilsTest` (12 tests) | Excellent | Complete branch coverage |
-| Model DTOs (serialization) | `ModelSerializationTest` (20 tests) | Good | 22/36 model classes covered; missing-field edge cases absent |
-| `CyclesProperties` | None | **Not tested** | Has default values and nested config worth verifying |
-| `CyclesProtocolException` | None | **Not tested** | Has 7 boolean helper methods with business logic |
+| Source Class | Test Class | Tests | Assessment | Notes |
+|---|---|---|---|---|
+| `CyclesLifecycleService` | `CyclesLifecycleServiceTest` | 35 | Excellent | Lifecycle, error branches, heartbeat, release/commit failures all covered |
+| `CyclesAspect` | `CyclesAspectTest` | 5 | Excellent | All branches covered for this thin adapter |
+| `DefaultCyclesClient` | `DefaultCyclesClientTest` | 20 | Excellent | All endpoints, POJO reflection, error fallbacks covered |
+| `CyclesExpressionEvaluator` | `CyclesExpressionEvaluatorTest` | 14 | Excellent | SpEL evaluation, #target, #result, invalid expressions, zero boundary |
+| `CyclesValueResolutionService` | `CyclesValueResolutionServiceTest` | 14 | Excellent | Priority chain, config mapping, resolver integration |
+| `InMemoryCommitRetryEngine` | `InMemoryCommitRetryEngineTest` | 7 | Very Good | Retry flows, max delay capping covered; shutdown/concurrency untested |
+| `CyclesAutoConfiguration` | `CyclesAutoConfigurationTest` | 8 | Very Good | Bean creation, validation, 4 ConditionalOnMissingBean overrides tested |
+| `CyclesRequestBuilderService` | `CyclesRequestBuilderServiceTest` | 30 | Excellent | All builders, field length validation, edge cases, tags covered |
+| `CyclesContextHolder` | `CyclesContextHolderTest` | 11 | Excellent | Complete coverage |
+| `CyclesResponse` | `CyclesResponseTest` | 16 | Excellent | Thorough boundary and factory testing |
+| `ValidationUtils` | `ValidationUtilsTest` | 15 | Excellent | Complete branch coverage |
+| Model DTOs (serialization) | `ModelSerializationTest` | 47 | Excellent | All enums, DTOs, fromMap null handling, round-trips covered |
+| `CyclesProperties` | `CyclesPropertiesTest` | 6 | Very Good | Default values and setter coverage |
+| `CyclesProtocolException` | `CyclesProtocolExceptionTest` | 12 | Excellent | All constructors, all 7 boolean helpers, mutual exclusivity |
 
 **Interfaces/constants excluded from coverage (no logic to test):** `CyclesClient`, `CyclesFieldResolver`, `CommitRetryEngine`, `Constants`
 
-## Estimated Overall Coverage: ~75-80%
+## Estimated Overall Coverage: ~90-95%
 
-Strong coverage of happy paths and core business logic. Gaps concentrated in error-handling branches, defensive null checks, and configuration override scenarios.
+Comprehensive coverage across all major components. Happy paths, error handling branches, edge cases, and configuration scenarios are well tested. Remaining gaps are minor and concentrated in concurrency, timeout wiring, and integration testing.
 
 ---
 
-## Gap Details
+## Resolved Gaps (from previous audit)
 
-### 1. CyclesAutoConfiguration — MEDIUM priority
+The following gaps identified in the prior audit have been fully addressed:
 
-Only 1 of 7 `@ConditionalOnMissingBean` overrides tested (CyclesClient). Missing:
+- **CyclesProtocolException** — NEW test class with 12 tests: all constructors, all 7 boolean helpers, null error code, mutual exclusivity
+- **CyclesProperties** — NEW test class with 6 tests: HTTP and retry default values, all setters
+- **CyclesAutoConfiguration** — Added 3 bean override tests (CommitRetryEngine, ExpressionEvaluator, LifecycleService) + blank api-key validation
+- **CyclesLifecycleService** — Added 11 tests: null decision, null reservation result, release HTTP error/exception handling, commit RESERVATION_EXPIRED, unrecognized response status, buildProtocolException null fallback
+- **DefaultCyclesClient** — Added 6 tests: POJO idempotency key extraction, POJO without getter, error field fallback, HTTP status fallback, GET transport error
+- **CyclesExpressionEvaluator** — Added 5 tests: invalid SpEL, #target variable, literal zero, computed zero
+- **CyclesRequestBuilderService** — Added 12 tests: subject/action field length validation, dimension edge cases, action tags, negative commit amount, missing tenant for event/decision
+- **InMemoryCommitRetryEngine** — Added 1 test: max delay capping
+- **ModelSerializationTest** — Added 27 tests: all enum fromString (null/unknown), ErrorCode.isRetryable, Action/Caps/SignedAmount/DryRunResult fromMap, ReservationSummary/Detail/List fromMap, null handling for all response DTOs
 
-- Custom `CyclesLifecycleService` bean override
+---
+
+## Remaining Gaps
+
+### 1. CyclesAutoConfiguration — LOW priority
+
+4 of 9 `@ConditionalOnMissingBean` overrides now tested (CyclesClient, CommitRetryEngine, ExpressionEvaluator, LifecycleService). Remaining:
+
 - Custom `CyclesRequestBuilderService` bean override
-- Custom `CyclesExpressionEvaluator` bean override
 - Custom `CyclesValueResolutionService` bean override
-- Custom `InMemoryCommitRetryEngine` bean override
 - Custom `CyclesAspect` bean override
-- HTTP timeout configuration wiring (`connectTimeout`, `readTimeout`)
+- HTTP timeout configuration wiring verification (`connectTimeout`, `readTimeout` applied to WebClient)
 - Custom `CyclesFieldResolver` bean registration and injection
 
-### 2. CyclesLifecycleService — MEDIUM priority
+### 2. InMemoryCommitRetryEngine — LOW priority
 
-24 tests cover the main reserve/execute/commit lifecycle. Missing:
+7 tests cover retry flows including delay capping. Remaining:
 
-- `handleRelease()` failure path (release call itself fails or throws)
-- `handleCommit()` with unrecognized/unexpected response status
-- `handleCommit()` when CommitResult is null but response is 2xx
-- `buildProtocolException()` with null errorResponse (fallback branch)
-- `extractErrorCode()` with null errorResponse (fallback branch)
+- Concurrent retry scheduling for the same reservation (thread safety)
+- `shutdown()` / cleanup behavior
+- Retry-after-ms from server response being respected
+
+### 3. CyclesLifecycleService — LOW priority
+
+35 tests provide comprehensive lifecycle coverage. Remaining minor gaps:
+
 - `commitMetadata` passthrough from annotation to commit request
-- Null `decision` field in reservation response
+- `useEstimateIfActualNotProvided=true` path (estimate alone used successfully)
+- Concurrent `@Cycles`-annotated calls (thread isolation under load)
 
-### 3. DefaultCyclesClient — LOW priority
+### 4. DefaultCyclesClient — LOW priority
 
-14 tests cover all API endpoints. Missing:
+20 tests cover all endpoints and error paths. Remaining:
 
-- POJO-based idempotency key extraction via reflection (`extractIdempotencyKey`)
-- 5xx error response body parsing
-- Missing/malformed fields in error responses
-- Connection timeout and read timeout behavior
-
-### 4. CyclesRequestBuilderService — LOW priority
-
-18 tests cover all builder methods. Missing:
-
-- Subject field length validation (128-char limit)
-- Action kind length validation (64-char limit)
-- Action name length validation (256-char limit)
-- `buildEvent()` validation failure paths
-- `buildDecision()` validation failure paths
-- Action `tags` field population
+- Request body JSON serialization verification (asserting exact body content sent to MockWebServer)
+- Connection/read timeout behavior under slow responses
+- Custom header passthrough beyond `X-Idempotency-Key` and `X-Cycles-API-Key`
 
 ### 5. CyclesExpressionEvaluator — LOW priority
 
-9 tests cover core SpEL evaluation. Missing:
+14 tests cover SpEL evaluation thoroughly. Remaining:
 
-- `#target` variable usage in expressions
-- Invalid/malformed SpEL expression error handling
-- Expression evaluating to exactly zero (boundary)
-- Expression evaluating to non-numeric type
+- Expression evaluating to non-numeric type (e.g., returns a String)
+- Very large numbers / overflow edge cases
 
-### 6. InMemoryCommitRetryEngine — LOW priority
+### 6. Integration/E2E Testing — NOT PRESENT
 
-6 tests cover retry flows. Missing:
-
-- Delay cap branch in `scheduleNextAttempt()` (when calculated delay exceeds maxDelay)
-- Concurrent retry scheduling for the same reservation
-- Shutdown/cleanup behavior
-
-### 7. CyclesProtocolException — LOW priority
-
-No dedicated test class. Missing:
-
-- Constructor variants (message-only, message+cause, full constructor)
-- `isBudgetExceeded()` — returns true only for `BUDGET_EXCEEDED`
-- `isOverdraftLimitExceeded()` — returns true only for `OVERDRAFT_LIMIT_EXCEEDED`
-- `isDebtOutstanding()` — returns true only for `DEBT_OUTSTANDING`
-- `isReservationExpired()` — returns true only for `RESERVATION_EXPIRED`
-- `isReservationFinalized()` — returns true only for `RESERVATION_FINALIZED`
-- `isIdempotencyMismatch()` — returns true only for `IDEMPOTENCY_MISMATCH`
-- `isUnitMismatch()` — returns true only for `UNIT_MISMATCH`
-
-### 8. CyclesProperties — LOW priority
-
-No dedicated test class. Missing:
-
-- Default values for HTTP config (`connectTimeout=2s`, `readTimeout=5s`)
-- Default values for retry config (`enabled=true`, `maxAttempts=5`, `initialDelay=500ms`, `multiplier=2.0`, `maxDelay=30s`)
-- Spring property binding for nested `Http` and `Retry` inner classes
-
-### 9. Model DTOs — LOW priority
-
-14 of 36 model classes lack serialization tests:
-
-- `Action` — no `toMap()`/`fromMap()` tests
-- `Caps` — no `toMap()`/`fromMap()` tests
-- `SignedAmount` — no `toMap()`/`fromMap()` tests
-- `DryRunResult` — no `fromMap()` tests
-- `ReservationDetailResult` — no `fromMap()` tests
-- `ReservationListResult` — no `fromMap()` tests
-- `ReservationSummaryResult` — no `fromMap()` tests
-- `CommitStatus` (enum) — no `fromString()` tests
-- `EventStatus` (enum) — no `fromString()` tests
-- `ExtendStatus` (enum) — no `fromString()` tests
-- `ReservationStatus` (enum) — no `fromString()` tests
-- `ReleaseStatus` (enum) — no `fromString()` tests
-
-Also missing across tested models:
-
-- `fromMap()` with missing/null fields
-- `fromMap()` with wrong-type values
-- Round-trip consistency (`toMap()` → `fromMap()` → `toMap()`)
-
-### 10. Integration/E2E Testing — NOT PRESENT
-
-No integration tests exist. Missing:
+No integration tests exist. These would provide value but are not required for unit coverage:
 
 - Full AOP interception with real Spring context (`@SpringBootTest`)
 - End-to-end reserve → execute → commit with MockWebServer
