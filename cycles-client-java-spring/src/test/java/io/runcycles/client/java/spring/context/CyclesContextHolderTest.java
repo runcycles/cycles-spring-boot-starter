@@ -75,7 +75,7 @@ class CyclesContextHolderTest {
 
         @Test
         void shouldExposeAllConstructorFields() {
-            Amount reserved = new Amount(Unit.TOKENS, 1000);
+            Amount reserved = new Amount(Unit.TOKENS, 1000L);
             CyclesReservationContext ctx = new CyclesReservationContext(
                     "res-1", 500, Decision.ALLOW_WITH_CAPS, null,
                     1700000060000L, List.of("tenant:t1"), "tenant:t1",

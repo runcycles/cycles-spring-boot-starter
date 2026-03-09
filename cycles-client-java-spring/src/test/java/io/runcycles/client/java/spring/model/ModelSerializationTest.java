@@ -26,7 +26,7 @@ class ModelSerializationTest {
                     .idempotencyKey("idem-1")
                     .subject(Subject.builder().tenant("t1").workspace("ws1").build())
                     .action(new Action("llm.completion", "gpt-4", List.of("prod")))
-                    .estimate(new Amount(Unit.TOKENS, 1000))
+                    .estimate(new Amount(Unit.TOKENS, 1000L))
                     .ttlMs(30000L)
                     .gracePeriodMs(10000L)
                     .overagePolicy(CommitOveragePolicy.ALLOW_IF_AVAILABLE)
@@ -69,7 +69,7 @@ class ModelSerializationTest {
                     .idempotencyKey("idem-1")
                     .subject(Subject.builder().tenant("t1").build())
                     .action(new Action("test", "test", null))
-                    .estimate(new Amount(Unit.TOKENS, 100))
+                    .estimate(new Amount(Unit.TOKENS, 100L))
                     .ttlMs(null)
                     .gracePeriodMs(null)
                     .overagePolicy(null)
@@ -100,7 +100,7 @@ class ModelSerializationTest {
 
             var req = CommitRequest.builder()
                     .idempotencyKey("commit-1")
-                    .actual(new Amount(Unit.TOKENS, 800))
+                    .actual(new Amount(Unit.TOKENS, 800L))
                     .metrics(metrics)
                     .metadata(Map.of("session", "abc"))
                     .build();
@@ -162,7 +162,7 @@ class ModelSerializationTest {
                     .idempotencyKey("dec-1")
                     .subject(Subject.builder().tenant("t1").app("my-app").build())
                     .action(new Action("llm.completion", "claude-3", null))
-                    .estimate(new Amount(Unit.USD_MICROCENTS, 5000))
+                    .estimate(new Amount(Unit.USD_MICROCENTS, 5000L))
                     .metadata(Map.of("source", "test"))
                     .build();
 
@@ -186,7 +186,7 @@ class ModelSerializationTest {
                     .idempotencyKey("evt-1")
                     .subject(Subject.builder().tenant("t1").build())
                     .action(new Action("tool.search", "web-search", null))
-                    .actual(new Amount(Unit.CREDITS, 10))
+                    .actual(new Amount(Unit.CREDITS, 10L))
                     .overagePolicy(CommitOveragePolicy.ALLOW_WITH_OVERDRAFT)
                     .clientTimeMs(1700000000000L)
                     .build();
@@ -467,7 +467,7 @@ class ModelSerializationTest {
 
         @Test
         void shouldRoundTrip() {
-            Amount original = new Amount(Unit.USD_MICROCENTS, 5000000);
+            Amount original = new Amount(Unit.USD_MICROCENTS, 5000000L);
             Map<String, Object> map = original.toMap();
             Amount restored = Amount.fromMap(map);
 
@@ -477,7 +477,7 @@ class ModelSerializationTest {
 
         @Test
         void shouldSerializeUnitAsString() {
-            Map<String, Object> map = new Amount(Unit.TOKENS, 100).toMap();
+            Map<String, Object> map = new Amount(Unit.TOKENS, 100L).toMap();
             assertThat(map.get("unit")).isEqualTo("TOKENS");
         }
     }
@@ -787,7 +787,7 @@ class ModelSerializationTest {
         void fromMapWithMissingFields() {
             SignedAmount sa = SignedAmount.fromMap(Map.of());
             assertThat(sa.getUnit()).isNull();
-            assertThat(sa.getAmount()).isEqualTo(0L);
+            assertThat(sa.getAmount()).isNull();
         }
     }
 
@@ -988,7 +988,7 @@ class ModelSerializationTest {
                     Caps.fromMap(Map.of("max_tokens", 100)),
                     List.of("tenant:t1"),
                     "tenant:t1",
-                    new Amount(Unit.TOKENS, 500),
+                    new Amount(Unit.TOKENS, 500L),
                     List.of(),
                     "APPROACHING_LIMIT",
                     3000
