@@ -151,5 +151,53 @@ class CyclesExpressionEvaluatorTest {
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("must not be negative");
         }
+
+        @Test
+        void shouldThrowOnInvalidSpelExpression() throws Exception {
+            assertThatThrownBy(() -> evaluator.evaluate("##invalid[[", processMethod(),
+                    new Object[]{100, "gpt-4"}, null, new SampleService()))
+                    .isInstanceOf(org.springframework.expression.ParseException.class);
+        }
+    }
+
+    // ========================================================================
+    // #target variable
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Target variable binding")
+    class TargetBinding {
+
+        @Test
+        void shouldBindTargetVariable() throws Exception {
+            // #target refers to the root object, which is the target instance
+            // SampleService has a class name, so we can call toString or use it
+            long result = evaluator.evaluate("#target.getClass().getSimpleName().length()", processMethod(),
+                    new Object[]{100, "gpt-4"}, null, new SampleService());
+            assertThat(result).isEqualTo("SampleService".length());
+        }
+    }
+
+    // ========================================================================
+    // Zero boundary
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Zero boundary")
+    class ZeroBoundary {
+
+        @Test
+        void shouldAllowZeroValue() throws Exception {
+            long result = evaluator.evaluate("0", processMethod(),
+                    new Object[]{100, "gpt-4"}, null, new SampleService());
+            assertThat(result).isEqualTo(0L);
+        }
+
+        @Test
+        void shouldAllowZeroComputedValue() throws Exception {
+            long result = evaluator.evaluate("#tokens * 0", processMethod(),
+                    new Object[]{100, "gpt-4"}, null, new SampleService());
+            assertThat(result).isEqualTo(0L);
+        }
     }
 }

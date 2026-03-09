@@ -362,5 +362,173 @@ class CyclesRequestBuilderServiceTest {
                     .isInstanceOf(CyclesProtocolException.class)
                     .hasMessageContaining("Invalid dimension");
         }
+
+        @Test
+        void shouldRejectEqualsAtStart() {
+            assertThatThrownBy(() ->
+                    CyclesRequestBuilderService.parseDimensions(new String[]{"=value"}))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("Invalid dimension");
+        }
+
+        @Test
+        void shouldRejectEqualsAtEnd() {
+            assertThatThrownBy(() ->
+                    CyclesRequestBuilderService.parseDimensions(new String[]{"key="}))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("Invalid dimension");
+        }
+    }
+
+    // ========================================================================
+    // Subject field length validation
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Subject field length validation")
+    class SubjectFieldLength {
+
+        @Test
+        void shouldRejectTenantExceedingMaxLength() {
+            String longTenant = "t".repeat(129);
+            Cycles cycles = mockCycles(longTenant, "TOKENS", 60000, 5000, "REJECT", false);
+            when(resolver.resolve("tenant", longTenant)).thenReturn(longTenant);
+
+            assertThatThrownBy(() ->
+                    service.buildReservation(cycles, 1000, "llm", "test", null))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("max length");
+        }
+
+        @Test
+        void shouldAcceptTenantAtMaxLength() {
+            String maxTenant = "t".repeat(128);
+            Cycles cycles = mockCycles(maxTenant, "TOKENS", 60000, 5000, "REJECT", false);
+            when(resolver.resolve("tenant", maxTenant)).thenReturn(maxTenant);
+
+            Map<String, Object> body = service.buildReservation(cycles, 1000, "llm", "test", null);
+            assertThat(body).containsKey("subject");
+        }
+    }
+
+    // ========================================================================
+    // Action field length validation
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Action field length validation")
+    class ActionFieldLength {
+
+        @Test
+        void shouldRejectActionKindExceedingMaxLength() {
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            String longKind = "k".repeat(65);
+
+            assertThatThrownBy(() ->
+                    service.buildReservation(cycles, 1000, longKind, "test", null))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("Action.kind");
+        }
+
+        @Test
+        void shouldRejectActionNameExceedingMaxLength() {
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            String longName = "n".repeat(257);
+
+            assertThatThrownBy(() ->
+                    service.buildReservation(cycles, 1000, "llm", longName, null))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("Action.name");
+        }
+    }
+
+    // ========================================================================
+    // Action tags
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Action tags")
+    class ActionTags {
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void shouldIncludeActionTags() {
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            when(cycles.actionTags()).thenReturn(new String[]{"prod", "billing"});
+
+            Map<String, Object> body = service.buildReservation(cycles, 1000, "llm", "gpt-4", null);
+
+            Map<String, Object> action = (Map<String, Object>) body.get("action");
+            assertThat(action.get("tags")).isEqualTo(java.util.List.of("prod", "billing"));
+        }
+    }
+
+    // ========================================================================
+    // buildCommit with negative actual
+    // ========================================================================
+
+    @Nested
+    @DisplayName("buildCommit validation")
+    class BuildCommitValidation {
+
+        @Test
+        void shouldRejectNegativeActualAmount() {
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+
+            assertThatThrownBy(() ->
+                    service.buildCommit(cycles, -1, null, null))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("Actual amount");
+        }
+    }
+
+    // ========================================================================
+    // buildEvent validation
+    // ========================================================================
+
+    @Nested
+    @DisplayName("buildEvent validation")
+    class BuildEventValidation {
+
+        @Test
+        void shouldRejectMissingTenant() {
+            Cycles cycles = mockCycles("", "TOKENS", 60000, 5000, "REJECT", false);
+            when(resolver.resolve("tenant", "")).thenReturn("");
+
+            assertThatThrownBy(() ->
+                    service.buildEvent(cycles, 500, "tool", "search", null, null, null))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("tenant");
+        }
+
+        @Test
+        void shouldRejectInvalidOveragePolicy() {
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "INVALID", false);
+
+            assertThatThrownBy(() ->
+                    service.buildEvent(cycles, 500, "tool", "search", null, null, null))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("overage_policy");
+        }
+    }
+
+    // ========================================================================
+    // buildDecision validation
+    // ========================================================================
+
+    @Nested
+    @DisplayName("buildDecision validation")
+    class BuildDecisionValidation {
+
+        @Test
+        void shouldRejectMissingTenant() {
+            Cycles cycles = mockCycles("", "TOKENS", 60000, 5000, "REJECT", false);
+            when(resolver.resolve("tenant", "")).thenReturn("");
+
+            assertThatThrownBy(() ->
+                    service.buildDecision(cycles, 1000, "llm", "gpt-4", null))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("tenant");
+        }
     }
 }
