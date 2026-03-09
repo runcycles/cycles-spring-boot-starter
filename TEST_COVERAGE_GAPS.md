@@ -1,94 +1,149 @@
 # Test Coverage Gap Analysis
 
-## Current State: 3 test classes covering 3 out of ~15 testable source classes
+## Current State: 12 test classes covering ~150 tests across all major components
 
-| Source Class | Test Exists? | Coverage Level |
-|---|---|---|
-| `DefaultCyclesClient` | Yes | Good |
-| `CyclesRequestBuilderService` | Yes | Good |
-| Model DTOs (toMap/fromMap) | Yes | Good |
-| **`CyclesLifecycleService`** | **No** | **None - CRITICAL** |
-| **`CyclesAspect`** | **No** | **None - HIGH** |
-| **`CyclesExpressionEvaluator`** | **No** | **None - HIGH** |
-| **`CyclesValueResolutionService`** | **No** | **None - HIGH** |
-| **`InMemoryCommitRetryEngine`** | **No** | **None - MEDIUM** |
-| **`CyclesAutoConfiguration`** | **No** | **None - MEDIUM** |
-| **`CyclesContextHolder`** | **No** | **None - LOW** |
-| **`CyclesReservationContext`** | **No** | **None - LOW** |
-| **`CyclesResponse`** | **No** | **None - LOW** |
-| **`ValidationUtils`** | **No** | **None - LOW** |
+**Last audited:** 2026-03-09
 
-## Estimated overall coverage: ~20-25%
+## Coverage Summary
+
+| Source Class | Test Class | Assessment | Notes |
+|---|---|---|---|
+| `CyclesLifecycleService` | `CyclesLifecycleServiceTest` (24 tests) | Good | Core lifecycle paths covered; error branches missing |
+| `CyclesAspect` | `CyclesAspectTest` (5 tests) | Excellent | All branches covered for this thin adapter |
+| `DefaultCyclesClient` | `DefaultCyclesClientTest` (14 tests) | Good | All endpoints tested; reflection path and error parsing gaps |
+| `CyclesExpressionEvaluator` | `CyclesExpressionEvaluatorTest` (9 tests) | Good | Core SpEL tested; #target, invalid expressions, zero boundary missing |
+| `CyclesValueResolutionService` | `CyclesValueResolutionServiceTest` (12 tests) | Excellent | Priority chain tested; only resolver error edge cases missing |
+| `InMemoryCommitRetryEngine` | `InMemoryCommitRetryEngineTest` (6 tests) | Good | Retry flows tested; delay cap branch never triggered |
+| `CyclesAutoConfiguration` | `CyclesAutoConfigurationTest` (5 tests) | Adequate | Bean creation and validation tested; 6/7 ConditionalOnMissingBean overrides untested |
+| `CyclesRequestBuilderService` | `CyclesRequestBuilderServiceTest` (18 tests) | Good | Builders tested; field length validation and some error paths missing |
+| `CyclesContextHolder` | `CyclesContextHolderTest` (11 tests) | Excellent | Complete coverage |
+| `CyclesResponse` | `CyclesResponseTest` (14 tests) | Excellent | Thorough boundary testing |
+| `ValidationUtils` | `ValidationUtilsTest` (12 tests) | Excellent | Complete branch coverage |
+| Model DTOs (serialization) | `ModelSerializationTest` (20 tests) | Good | 22/36 model classes covered; missing-field edge cases absent |
+| `CyclesProperties` | None | **Not tested** | Has default values and nested config worth verifying |
+| `CyclesProtocolException` | None | **Not tested** | Has 7 boolean helper methods with business logic |
+
+**Interfaces/constants excluded from coverage (no logic to test):** `CyclesClient`, `CyclesFieldResolver`, `CommitRetryEngine`, `Constants`
+
+## Estimated Overall Coverage: ~75-80%
+
+Strong coverage of happy paths and core business logic. Gaps concentrated in error-handling branches, defensive null checks, and configuration override scenarios.
+
+---
 
 ## Gap Details
 
-### 1. CyclesLifecycleService - CRITICAL
+### 1. CyclesAutoConfiguration — MEDIUM priority
 
-Core orchestrator with the most complex business logic and zero tests.
+Only 1 of 7 `@ConditionalOnMissingBean` overrides tested (CyclesClient). Missing:
 
-Missing scenarios:
-- Happy path: reserve -> execute -> commit lifecycle
-- DENY decision -> throws CyclesProtocolException
-- ALLOW_WITH_CAPS decision -> proceeds with caps in context
-- Dry-run mode (both ALLOW and DENY outcomes)
-- Guarded method throws -> reservation released
-- Commit fails with retryable error (5xx/transport) -> retry engine scheduled
-- Commit fails with RESERVATION_FINALIZED/EXPIRED -> skips release
-- Commit fails with non-retryable 4xx -> releases reservation
-- resolveActualAmount: SpEL actual(), useEstimateIfActualNotProvided, missing actual
-- resolveEstimateExpression: value() vs estimate(), both set throws, neither set throws
-- Heartbeat scheduling and cancellation
-- Context holder set/clear lifecycle
-- Null reservationId after successful reservation
+- Custom `CyclesLifecycleService` bean override
+- Custom `CyclesRequestBuilderService` bean override
+- Custom `CyclesExpressionEvaluator` bean override
+- Custom `CyclesValueResolutionService` bean override
+- Custom `InMemoryCommitRetryEngine` bean override
+- Custom `CyclesAspect` bean override
+- HTTP timeout configuration wiring (`connectTimeout`, `readTimeout`)
+- Custom `CyclesFieldResolver` bean registration and injection
 
-### 2. CyclesAspect - HIGH
+### 2. CyclesLifecycleService — MEDIUM priority
 
-- Nested @Cycles detection -> IllegalStateException
-- Default actionKind/actionName from class/method names
-- Custom actionKind/actionName from annotation
-- Delegation to CyclesLifecycleService
+24 tests cover the main reserve/execute/commit lifecycle. Missing:
 
-### 3. CyclesExpressionEvaluator - HIGH
+- `handleRelease()` failure path (release call itself fails or throws)
+- `handleCommit()` with unrecognized/unexpected response status
+- `handleCommit()` when CommitResult is null but response is 2xx
+- `buildProtocolException()` with null errorResponse (fallback branch)
+- `extractErrorCode()` with null errorResponse (fallback branch)
+- `commitMetadata` passthrough from annotation to commit request
+- Null `decision` field in reservation response
 
-- SpEL evaluation with method parameter binding
-- #result variable binding for actual-cost expressions
-- Literal numeric expressions
-- Null result -> IllegalArgumentException
-- Negative result -> IllegalArgumentException
+### 3. DefaultCyclesClient — LOW priority
 
-### 4. CyclesValueResolutionService - HIGH
+14 tests cover all API endpoints. Missing:
 
-- Priority: annotation -> config -> resolver
-- Returns null when all sources empty
-- Config field switch for all 6 fields
-- Unknown field name
+- POJO-based idempotency key extraction via reflection (`extractIdempotencyKey`)
+- 5xx error response body parsing
+- Missing/malformed fields in error responses
+- Connection timeout and read timeout behavior
 
-### 5. InMemoryCommitRetryEngine - MEDIUM
+### 4. CyclesRequestBuilderService — LOW priority
 
-- Retry disabled -> no-op
-- Successful retry
-- Exponential backoff with max delay cap
-- Max attempts exhaustion
-- Non-retryable vs retryable errors
+18 tests cover all builder methods. Missing:
 
-### 6. CyclesAutoConfiguration - MEDIUM
+- Subject field length validation (128-char limit)
+- Action kind length validation (64-char limit)
+- Action name length validation (256-char limit)
+- `buildEvent()` validation failure paths
+- `buildDecision()` validation failure paths
+- Action `tags` field population
 
-- Bean creation
-- Missing baseUrl/apiKey validation
-- ConditionalOnMissingBean behavior
+### 5. CyclesExpressionEvaluator — LOW priority
 
-### 7. CyclesResponse - LOW
+9 tests cover core SpEL evaluation. Missing:
 
-- Factory methods
-- Status classification boundary conditions
-- getBodyAttributeAsString edge cases
-- getErrorResponse parsing
+- `#target` variable usage in expressions
+- Invalid/malformed SpEL expression error handling
+- Expression evaluating to exactly zero (boundary)
+- Expression evaluating to non-numeric type
 
-### 8. CyclesContextHolder / CyclesReservationContext - LOW
+### 6. InMemoryCommitRetryEngine — LOW priority
 
-- ThreadLocal lifecycle
-- Context state accessors
+6 tests cover retry flows. Missing:
 
-### 9. ValidationUtils - LOW
+- Delay cap branch in `scheduleNextAttempt()` (when calculated delay exceeds maxDelay)
+- Concurrent retry scheduling for the same reservation
+- Shutdown/cleanup behavior
 
-- putIfNotBlank, requireNotBlank, resolve, hasText edge cases
+### 7. CyclesProtocolException — LOW priority
+
+No dedicated test class. Missing:
+
+- Constructor variants (message-only, message+cause, full constructor)
+- `isBudgetExceeded()` — returns true only for `BUDGET_EXCEEDED`
+- `isOverdraftLimitExceeded()` — returns true only for `OVERDRAFT_LIMIT_EXCEEDED`
+- `isDebtOutstanding()` — returns true only for `DEBT_OUTSTANDING`
+- `isReservationExpired()` — returns true only for `RESERVATION_EXPIRED`
+- `isReservationFinalized()` — returns true only for `RESERVATION_FINALIZED`
+- `isIdempotencyMismatch()` — returns true only for `IDEMPOTENCY_MISMATCH`
+- `isUnitMismatch()` — returns true only for `UNIT_MISMATCH`
+
+### 8. CyclesProperties — LOW priority
+
+No dedicated test class. Missing:
+
+- Default values for HTTP config (`connectTimeout=2s`, `readTimeout=5s`)
+- Default values for retry config (`enabled=true`, `maxAttempts=5`, `initialDelay=500ms`, `multiplier=2.0`, `maxDelay=30s`)
+- Spring property binding for nested `Http` and `Retry` inner classes
+
+### 9. Model DTOs — LOW priority
+
+14 of 36 model classes lack serialization tests:
+
+- `Action` — no `toMap()`/`fromMap()` tests
+- `Caps` — no `toMap()`/`fromMap()` tests
+- `SignedAmount` — no `toMap()`/`fromMap()` tests
+- `DryRunResult` — no `fromMap()` tests
+- `ReservationDetailResult` — no `fromMap()` tests
+- `ReservationListResult` — no `fromMap()` tests
+- `ReservationSummaryResult` — no `fromMap()` tests
+- `CommitStatus` (enum) — no `fromString()` tests
+- `EventStatus` (enum) — no `fromString()` tests
+- `ExtendStatus` (enum) — no `fromString()` tests
+- `ReservationStatus` (enum) — no `fromString()` tests
+- `ReleaseStatus` (enum) — no `fromString()` tests
+
+Also missing across tested models:
+
+- `fromMap()` with missing/null fields
+- `fromMap()` with wrong-type values
+- Round-trip consistency (`toMap()` → `fromMap()` → `toMap()`)
+
+### 10. Integration/E2E Testing — NOT PRESENT
+
+No integration tests exist. Missing:
+
+- Full AOP interception with real Spring context (`@SpringBootTest`)
+- End-to-end reserve → execute → commit with MockWebServer
+- Thread isolation under concurrent `@Cycles`-annotated calls
+- Property binding integration with `application.yml`/`application.properties`
