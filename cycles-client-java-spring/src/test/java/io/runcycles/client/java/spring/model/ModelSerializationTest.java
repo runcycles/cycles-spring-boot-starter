@@ -787,7 +787,7 @@ class ModelSerializationTest {
         void fromMapWithMissingFields() {
             SignedAmount sa = SignedAmount.fromMap(Map.of());
             assertThat(sa.getUnit()).isNull();
-            assertThat(sa.getAmount()).isEqualTo(0L);
+            assertThat(sa.getAmount()).isNull();
         }
     }
 
