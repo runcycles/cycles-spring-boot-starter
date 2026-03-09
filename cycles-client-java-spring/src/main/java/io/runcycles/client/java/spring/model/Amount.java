@@ -9,9 +9,9 @@ import java.util.Map;
  */
 public class Amount {
     private final Unit unit;
-    private final long amount;
+    private final Long amount;
 
-    public Amount(Unit unit, long amount) {
+    public Amount(Unit unit, Long amount) {
         this.unit = unit;
         this.amount = amount;
     }
@@ -19,19 +19,19 @@ public class Amount {
     public static Amount fromMap(Map<String, Object> map) {
         if (map == null) return null;
         Unit unit = map.get("unit") instanceof String s ? Unit.fromString(s) : null;
-        long amount = map.get("amount") instanceof Number n ? n.longValue() : 0L;
+        Long amount = map.get("amount") instanceof Number n ? n.longValue() : null;
         return new Amount(unit, amount);
     }
 
     public Map<String, Object> toMap() {
         Map<String, Object> map = new HashMap<>();
         if (unit != null) map.put("unit", unit.name());
-        map.put("amount", amount);
+        if (amount != null) map.put("amount", amount);
         return map;
     }
 
     public Unit getUnit() { return unit; }
-    public long getAmount() { return amount; }
+    public Long getAmount() { return amount; }
 
     @Override
     public String toString() {
