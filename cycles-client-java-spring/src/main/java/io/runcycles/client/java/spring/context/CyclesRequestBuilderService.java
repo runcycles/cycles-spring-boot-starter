@@ -284,12 +284,7 @@ public class CyclesRequestBuilderService {
     private void validateMandatory(Map<String, String> resolvedFields,
                                    String actionKind, String actionName,
                                    long amount, String unit) {
-        // Spec: Subject.tenant is required and MUST be validated against the effective tenant
-        String tenant = resolvedFields.get(Constants.TENANT);
-        if (tenant == null || tenant.isBlank()) {
-            throw new CyclesProtocolException(
-                    "Subject.tenant is required: set via @Cycles(tenant=...), cycles.tenant config, or a CyclesFieldResolver");
-        }
+        // Spec: anyOf — at least one standard Subject field must be provided
         boolean hasAnySubjectField = resolvedFields.entrySet().stream()
                 .anyMatch(e -> e.getValue() != null && !e.getValue().isBlank());
         if (!hasAnySubjectField) {
