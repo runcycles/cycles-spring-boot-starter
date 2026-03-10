@@ -238,7 +238,7 @@ Error codes from the protocol:
 | ErrorCode | HTTP | Meaning |
 |---|---|---|
 | `INVALID_REQUEST` | 400 | Malformed request (missing required fields, invalid values) |
-| `UNAUTHORIZED` | 403 | Invalid or missing API key |
+| `UNAUTHORIZED` | 401 | Invalid or missing API key |
 | `FORBIDDEN` | 403 | Tenant mismatch (subject.tenant vs effective tenant) |
 | `NOT_FOUND` | 404 | Reservation does not exist |
 | `BUDGET_EXCEEDED` | 409 | Insufficient budget for reservation or commit |
@@ -298,18 +298,32 @@ cycles:
 
 ## Dry Run (Shadow Mode)
 
-Use `dryRun = true` to evaluate a reservation without persisting it or locking budget. The guarded method will **not** execute — the aspect returns `null` immediately after the server responds.
+Use `dryRun = true` to evaluate a reservation without persisting it or locking budget. The guarded method will **not** execute — the aspect returns a `DryRunResult` immediately after the server responds.
 
 ```java
 @Cycles(value = "#tokens * 10", dryRun = true)
 public String checkBudget(String prompt, int tokens) {
     // This method body never executes in dry_run mode.
-    // The aspect returns null after the server evaluates.
+    // The aspect returns a DryRunResult after the server evaluates.
     return callLlm(prompt, tokens);
 }
 ```
 
-The dry-run response includes `decision`, `caps`, and `affected_scopes` in the server response. If the server returns `decision=DENY`, a `CyclesProtocolException` is thrown (consistent with non-dry-run behavior), allowing callers to use dry-run as a programmatic budget availability check. If the decision is `ALLOW` or `ALLOW_WITH_CAPS`, the aspect returns `null` and the method does not execute.
+If the server returns `decision=DENY`, a `CyclesProtocolException` is thrown (consistent with non-dry-run behavior), allowing callers to use dry-run as a programmatic budget availability check. If the decision is `ALLOW` or `ALLOW_WITH_CAPS`, the aspect returns a `DryRunResult` and the method does not execute.
+
+The `DryRunResult` contains the full server evaluation:
+
+```java
+Object result = myService.checkBudget(prompt, tokens);
+if (result instanceof DryRunResult dryRun) {
+    Decision decision = dryRun.getDecision();       // ALLOW or ALLOW_WITH_CAPS
+    Caps caps = dryRun.getCaps();                    // soft constraints (if any)
+    List<String> scopes = dryRun.getAffectedScopes();
+    String scopePath = dryRun.getScopePath();
+    Amount reserved = dryRun.getReserved();
+    List<Balance> balances = dryRun.getBalances();   // current balances (if returned)
+}
+```
 
 ## Metrics on Commit
 
