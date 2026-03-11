@@ -9,6 +9,8 @@ import java.util.Map;
  */
 public class ValidationUtils {
 
+    private ValidationUtils() {}
+
     /**
      * Puts the key-value pair into the map only if the value is non-null and non-blank.
      *

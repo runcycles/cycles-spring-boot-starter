@@ -35,26 +35,66 @@ public class DryRunResult {
         this.retryAfterMs = retryAfterMs;
     }
 
-    /** Returns the server's decision. */
+    /**
+     * Returns the server's decision.
+     *
+     * @return The server's decision
+     */
     public Decision getDecision() { return decision; }
-    /** Returns the capability constraints, or {@code null} if none. */
+    /**
+     * Returns the capability constraints, or {@code null} if none.
+     *
+     * @return The capability constraints, or {@code null} if none
+     */
     public Caps getCaps() { return caps; }
-    /** Returns the list of affected budget scopes. */
+    /**
+     * Returns the list of affected budget scopes.
+     *
+     * @return The list of affected budget scopes
+     */
     public List<String> getAffectedScopes() { return affectedScopes; }
-    /** Returns the fully-qualified scope path. */
+    /**
+     * Returns the fully-qualified scope path.
+     *
+     * @return The fully-qualified scope path
+     */
     public String getScopePath() { return scopePath; }
-    /** Returns the would-be reserved amount. */
+    /**
+     * Returns the would-be reserved amount.
+     *
+     * @return The would-be reserved amount
+     */
     public Amount getReserved() { return reserved; }
-    /** Returns the current balances. */
+    /**
+     * Returns the current balances.
+     *
+     * @return The current balances
+     */
     public List<Balance> getBalances() { return balances; }
-    /** Returns the reason code for the decision, or {@code null}. */
+    /**
+     * Returns the reason code for the decision, or {@code null}.
+     *
+     * @return The reason code for the decision, or {@code null}
+     */
     public String getReasonCode() { return reasonCode; }
-    /** Returns the suggested retry delay in milliseconds, or {@code null}. */
+    /**
+     * Returns the suggested retry delay in milliseconds, or {@code null}.
+     *
+     * @return The suggested retry delay in milliseconds, or {@code null}
+     */
     public Integer getRetryAfterMs() { return retryAfterMs; }
 
-    /** Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}. */
+    /**
+     * Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}.
+     *
+     * @return {@code true} if the decision is {@code allow} or {@code allow_with_caps}
+     */
     public boolean isAllowed() { return decision == Decision.ALLOW || decision == Decision.ALLOW_WITH_CAPS; }
-    /** Returns {@code true} if capability constraints were returned by the server. */
+    /**
+     * Returns {@code true} if capability constraints were returned by the server.
+     *
+     * @return {@code true} if capability constraints were returned by the server
+     */
     public boolean hasCaps() { return caps != null; }
 
     @Override

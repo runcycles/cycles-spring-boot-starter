@@ -16,9 +16,17 @@ public class ReleaseRequest {
         this.reason = builder.reason;
     }
 
-    /** Returns the idempotency key. */
+    /**
+     * Returns the idempotency key.
+     *
+     * @return The idempotency key
+     */
     public String getIdempotencyKey() { return idempotencyKey; }
-    /** Returns the release reason. */
+    /**
+     * Returns the release reason.
+     *
+     * @return The release reason
+     */
     public String getReason() { return reason; }
 
     /**

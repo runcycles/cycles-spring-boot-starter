@@ -50,7 +50,11 @@ public enum ErrorCode {
         }
     }
 
-    /** Returns {@code true} if this error code indicates a transient failure that may succeed on retry. */
+    /**
+     * Returns {@code true} if this error code indicates a transient failure that may succeed on retry.
+     *
+     * @return {@code true} if this error code indicates a transient failure that may succeed on retry
+     */
     public boolean isRetryable() {
         return this == INTERNAL_ERROR || this == UNKNOWN;
     }

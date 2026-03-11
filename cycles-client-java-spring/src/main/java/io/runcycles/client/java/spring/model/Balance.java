@@ -74,23 +74,59 @@ public class Balance {
         return result;
     }
 
-    /** Returns the scope identifier (e.g., tenant, workspace). */
+    /**
+     * Returns the scope identifier (e.g., tenant, workspace).
+     *
+     * @return The scope identifier (e.g., tenant, workspace)
+     */
     public String getScope() { return scope; }
-    /** Returns the fully-qualified scope path. */
+    /**
+     * Returns the fully-qualified scope path.
+     *
+     * @return The fully-qualified scope path
+     */
     public String getScopePath() { return scopePath; }
-    /** Returns the remaining balance (may be negative in overdraft). */
+    /**
+     * Returns the remaining balance (may be negative in overdraft).
+     *
+     * @return The remaining balance (may be negative in overdraft)
+     */
     public SignedAmount getRemaining() { return remaining; }
-    /** Returns the total amount currently reserved. */
+    /**
+     * Returns the total amount currently reserved.
+     *
+     * @return The total amount currently reserved
+     */
     public Amount getReserved() { return reserved; }
-    /** Returns the total amount spent (committed). */
+    /**
+     * Returns the total amount spent (committed).
+     *
+     * @return The total amount spent (committed)
+     */
     public Amount getSpent() { return spent; }
-    /** Returns the total allocated budget. */
+    /**
+     * Returns the total allocated budget.
+     *
+     * @return The total allocated budget
+     */
     public Amount getAllocated() { return allocated; }
-    /** Returns the outstanding debt amount. */
+    /**
+     * Returns the outstanding debt amount.
+     *
+     * @return The outstanding debt amount
+     */
     public Amount getDebt() { return debt; }
-    /** Returns the overdraft limit for this scope. */
+    /**
+     * Returns the overdraft limit for this scope.
+     *
+     * @return The overdraft limit for this scope
+     */
     public Amount getOverdraftLimit() { return overdraftLimit; }
-    /** Returns whether the scope has exceeded its budget limit. */
+    /**
+     * Returns whether the scope has exceeded its budget limit.
+     *
+     * @return Whether the scope has exceeded its budget limit
+     */
     public Boolean getIsOverLimit() { return isOverLimit; }
 
     @Override

@@ -35,11 +35,23 @@ public class EventResult {
         );
     }
 
-    /** Returns the event status. */
+    /**
+     * Returns the event status.
+     *
+     * @return The event status
+     */
     public EventStatus getStatus() { return status; }
-    /** Returns the server-assigned event ID. */
+    /**
+     * Returns the server-assigned event ID.
+     *
+     * @return The server-assigned event id
+     */
     public String getEventId() { return eventId; }
-    /** Returns the updated balances after the event. */
+    /**
+     * Returns the updated balances after the event.
+     *
+     * @return The updated balances after the event
+     */
     public List<Balance> getBalances() { return balances; }
 
     @Override

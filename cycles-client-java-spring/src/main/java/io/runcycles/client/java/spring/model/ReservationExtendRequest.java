@@ -18,11 +18,23 @@ public class ReservationExtendRequest {
         this.metadata = builder.metadata;
     }
 
-    /** Returns the idempotency key. */
+    /**
+     * Returns the idempotency key.
+     *
+     * @return The idempotency key
+     */
     public String getIdempotencyKey() { return idempotencyKey; }
-    /** Returns the extension duration in milliseconds. */
+    /**
+     * Returns the extension duration in milliseconds.
+     *
+     * @return The extension duration in milliseconds
+     */
     public Long getExtendByMs() { return extendByMs; }
-    /** Returns the custom metadata. */
+    /**
+     * Returns the custom metadata.
+     *
+     * @return The custom metadata
+     */
     public Map<String, Object> getMetadata() { return metadata; }
 
     /**

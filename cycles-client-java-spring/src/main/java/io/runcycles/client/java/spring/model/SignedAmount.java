@@ -34,9 +34,17 @@ public class SignedAmount {
         return new SignedAmount(unit, amount);
     }
 
-    /** Returns the unit of measure. */
+    /**
+     * Returns the unit of measure.
+     *
+     * @return The unit of measure
+     */
     public Unit getUnit() { return unit; }
-    /** Returns the quantity (may be negative). */
+    /**
+     * Returns the quantity (may be negative).
+     *
+     * @return The quantity (may be negative)
+     */
     public Long getAmount() { return amount; }
 
     @Override

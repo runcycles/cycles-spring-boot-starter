@@ -22,15 +22,35 @@ public class DecisionRequest {
         this.metadata = builder.metadata;
     }
 
-    /** Returns the idempotency key. */
+    /**
+     * Returns the idempotency key.
+     *
+     * @return The idempotency key
+     */
     public String getIdempotencyKey() { return idempotencyKey; }
-    /** Returns the subject. */
+    /**
+     * Returns the subject.
+     *
+     * @return The subject
+     */
     public Subject getSubject() { return subject; }
-    /** Returns the action. */
+    /**
+     * Returns the action.
+     *
+     * @return The action
+     */
     public Action getAction() { return action; }
-    /** Returns the estimated amount. */
+    /**
+     * Returns the estimated amount.
+     *
+     * @return The estimated amount
+     */
     public Amount getEstimate() { return estimate; }
-    /** Returns the custom metadata. */
+    /**
+     * Returns the custom metadata.
+     *
+     * @return The custom metadata
+     */
     public Map<String, Object> getMetadata() { return metadata; }
 
     /**

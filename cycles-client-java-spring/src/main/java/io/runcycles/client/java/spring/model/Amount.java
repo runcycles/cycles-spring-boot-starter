@@ -47,9 +47,17 @@ public class Amount {
         return map;
     }
 
-    /** Returns the unit of measure. */
+    /**
+     * Returns the unit of measure.
+     *
+     * @return The unit of measure
+     */
     public Unit getUnit() { return unit; }
-    /** Returns the quantity. */
+    /**
+     * Returns the quantity.
+     *
+     * @return The quantity
+     */
     public Long getAmount() { return amount; }
 
     @Override

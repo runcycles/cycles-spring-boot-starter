@@ -14,13 +14,13 @@ import java.lang.annotation.*;
  *   <li>Commit the actual usage amount on success, or release the reservation on failure</li>
  * </ol>
  *
- * <h4>Minimal usage</h4>
+ * <h2>Minimal usage</h2>
  * <pre>{@code
  * @Cycles("1000")
  * public String callLlm(String prompt) { ... }
  * }</pre>
  *
- * <h4>With actual cost from return value</h4>
+ * <h2>With actual cost from return value</h2>
  * <pre>{@code
  * @Cycles(estimate = "#tokens * 10", actual = "#result.totalCost")
  * public LlmResponse callLlm(int tokens) { ... }

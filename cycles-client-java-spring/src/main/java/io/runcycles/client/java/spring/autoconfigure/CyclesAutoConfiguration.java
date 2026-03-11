@@ -42,7 +42,15 @@ import java.util.Map;
 @EnableConfigurationProperties(CyclesProperties.class)
 public class CyclesAutoConfiguration {
 
-    /** Configures the WebClient used for Cycles API communication. */
+    /** Creates a new auto-configuration instance. */
+    public CyclesAutoConfiguration() {}
+
+    /**
+     * Configures the WebClient used for Cycles API communication.
+     *
+     * @param props the Cycles configuration properties
+     * @return the configured WebClient
+     */
     @Bean
     @ConditionalOnMissingBean(name = "cyclesWebClient")
     public WebClient cyclesWebClient(CyclesProperties props) {
@@ -63,21 +71,36 @@ public class CyclesAutoConfiguration {
                 .build();
     }
 
-    /** Registers the default {@link CyclesClient} backed by WebClient. */
+    /**
+     * Registers the default {@link CyclesClient} backed by WebClient.
+     *
+     * @param cyclesWebClient the configured WebClient
+     * @return the default Cycles client
+     */
     @Bean
     @ConditionalOnMissingBean
     public CyclesClient cyclesClient(@Qualifier("cyclesWebClient") WebClient cyclesWebClient) {
         return new DefaultCyclesClient(cyclesWebClient);
     }
 
-    /** Registers the SpEL expression evaluator for {@code @Cycles} attributes. */
+    /**
+     * Registers the SpEL expression evaluator for {@code @Cycles} attributes.
+     *
+     * @return the expression evaluator
+     */
     @Bean
     @ConditionalOnMissingBean
     public CyclesExpressionEvaluator evaluator() {
         return new CyclesExpressionEvaluator();
     }
 
-    /** Registers the three-tier value resolution service. */
+    /**
+     * Registers the three-tier value resolution service.
+     *
+     * @param resolvers  the available field resolver beans
+     * @param properties the Cycles configuration properties
+     * @return the value resolution service
+     */
     @Bean
     @ConditionalOnMissingBean
     public CyclesValueResolutionService cyclesValueResolutionService(
@@ -87,7 +110,12 @@ public class CyclesAutoConfiguration {
         return new CyclesValueResolutionService(resolvers, properties);
     }
 
-    /** Registers the request payload builder service. */
+    /**
+     * Registers the request payload builder service.
+     *
+     * @param resolutionService the value resolution service
+     * @return the request builder service
+     */
     @Bean
     @ConditionalOnMissingBean
     public CyclesRequestBuilderService cyclesRequestBuilderService(
@@ -96,14 +124,28 @@ public class CyclesAutoConfiguration {
         return new CyclesRequestBuilderService(resolutionService);
     }
 
-    /** Registers the exponential-backoff retry engine for failed commits. */
+    /**
+     * Registers the exponential-backoff retry engine for failed commits.
+     *
+     * @param client the Cycles API client
+     * @param props  the Cycles configuration properties
+     * @return the commit retry engine
+     */
     @Bean
     @ConditionalOnMissingBean
     public CommitRetryEngine retryEngine(CyclesClient client, CyclesProperties props) {
         return new InMemoryCommitRetryEngine(client, props);
     }
 
-    /** Registers the lifecycle service orchestrating reserve/execute/commit. */
+    /**
+     * Registers the lifecycle service orchestrating reserve/execute/commit.
+     *
+     * @param client                the Cycles API client
+     * @param retryEngine           the commit retry engine
+     * @param requestBuilderService the request builder service
+     * @param evaluator             the SpEL expression evaluator
+     * @return the lifecycle service
+     */
     @Bean
     @ConditionalOnMissingBean
     public CyclesLifecycleService cyclesLifecycleService(CyclesClient client,
@@ -113,7 +155,12 @@ public class CyclesAutoConfiguration {
         return new CyclesLifecycleService(client, retryEngine, requestBuilderService, evaluator);
     }
 
-    /** Registers the AOP aspect that intercepts {@code @Cycles}-annotated methods. */
+    /**
+     * Registers the AOP aspect that intercepts {@code @Cycles}-annotated methods.
+     *
+     * @param lifecycleService the lifecycle service
+     * @return the Cycles aspect
+     */
     @Bean
     public CyclesAspect aspect(CyclesLifecycleService lifecycleService) {
         return new CyclesAspect(lifecycleService);

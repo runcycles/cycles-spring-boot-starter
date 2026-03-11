@@ -34,11 +34,23 @@ public class BalanceQueryResult {
         );
     }
 
-    /** Returns the list of balances. */
+    /**
+     * Returns the list of balances.
+     *
+     * @return The list of balances
+     */
     public List<Balance> getBalances() { return balances; }
-    /** Returns whether more results are available for pagination. */
+    /**
+     * Returns whether more results are available for pagination.
+     *
+     * @return Whether more results are available for pagination
+     */
     public Boolean getHasMore() { return hasMore; }
-    /** Returns the cursor for fetching the next page. */
+    /**
+     * Returns the cursor for fetching the next page.
+     *
+     * @return The cursor for fetching the next page
+     */
     public String getNextCursor() { return nextCursor; }
 
     @Override

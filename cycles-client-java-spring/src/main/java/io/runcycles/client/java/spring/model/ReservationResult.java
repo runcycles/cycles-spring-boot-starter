@@ -59,30 +59,78 @@ public class ReservationResult {
         );
     }
 
-    /** Returns the server's decision. */
+    /**
+     * Returns the server's decision.
+     *
+     * @return The server's decision
+     */
     public Decision getDecision() { return decision; }
-    /** Returns the server-assigned reservation ID. */
+    /**
+     * Returns the server-assigned reservation ID.
+     *
+     * @return The server-assigned reservation id
+     */
     public String getReservationId() { return reservationId; }
-    /** Returns the list of affected budget scopes. */
+    /**
+     * Returns the list of affected budget scopes.
+     *
+     * @return The list of affected budget scopes
+     */
     public List<String> getAffectedScopes() { return affectedScopes; }
-    /** Returns the expiration time in epoch milliseconds. */
+    /**
+     * Returns the expiration time in epoch milliseconds.
+     *
+     * @return The expiration time in epoch milliseconds
+     */
     public Long getExpiresAtMs() { return expiresAtMs; }
-    /** Returns the fully-qualified scope path. */
+    /**
+     * Returns the fully-qualified scope path.
+     *
+     * @return The fully-qualified scope path
+     */
     public String getScopePath() { return scopePath; }
-    /** Returns the reserved amount. */
+    /**
+     * Returns the reserved amount.
+     *
+     * @return The reserved amount
+     */
     public Amount getReserved() { return reserved; }
-    /** Returns the capability constraints, or {@code null} if none. */
+    /**
+     * Returns the capability constraints, or {@code null} if none.
+     *
+     * @return The capability constraints, or {@code null} if none
+     */
     public Caps getCaps() { return caps; }
-    /** Returns the reason code for the decision, or {@code null}. */
+    /**
+     * Returns the reason code for the decision, or {@code null}.
+     *
+     * @return The reason code for the decision, or {@code null}
+     */
     public String getReasonCode() { return reasonCode; }
-    /** Returns the suggested retry delay in milliseconds, or {@code null}. */
+    /**
+     * Returns the suggested retry delay in milliseconds, or {@code null}.
+     *
+     * @return The suggested retry delay in milliseconds, or {@code null}
+     */
     public Integer getRetryAfterMs() { return retryAfterMs; }
-    /** Returns the updated balances after the reservation. */
+    /**
+     * Returns the updated balances after the reservation.
+     *
+     * @return The updated balances after the reservation
+     */
     public List<Balance> getBalances() { return balances; }
 
-    /** Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}. */
+    /**
+     * Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}.
+     *
+     * @return {@code true} if the decision is {@code allow} or {@code allow_with_caps}
+     */
     public boolean isAllowed() { return decision == Decision.ALLOW || decision == Decision.ALLOW_WITH_CAPS; }
-    /** Returns {@code true} if the decision is {@code DENY}. */
+    /**
+     * Returns {@code true} if the decision is {@code DENY}.
+     *
+     * @return {@code true} if the decision is {@code deny}
+     */
     public boolean isDenied() { return decision == Decision.DENY; }
 
     @Override

@@ -12,14 +12,22 @@ package io.runcycles.client.java.spring.context;
  */
 public final class CyclesContextHolder {
 
+    private CyclesContextHolder() {}
+
     private static final ThreadLocal<CyclesReservationContext> HOLDER = new ThreadLocal<>();
 
-    /** Binds the given context to the current thread. */
+    /**
+     * Binds the given context to the current thread.
+     *
+     * @param ctx the reservation context to bind
+     */
     public static void set(CyclesReservationContext ctx) { HOLDER.set(ctx); }
 
     /**
      * Returns the active reservation context for the current thread, or {@code null}
      * if no reservation is in progress.
+     *
+     * @return the current reservation context, or {@code null}
      */
     public static CyclesReservationContext get() { return HOLDER.get(); }
 

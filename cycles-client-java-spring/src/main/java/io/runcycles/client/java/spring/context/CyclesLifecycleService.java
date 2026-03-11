@@ -27,6 +27,14 @@ public class CyclesLifecycleService {
     private final CyclesRequestBuilderService requestBuilderService;
     private final ScheduledExecutorService heartbeatExecutor;
 
+    /**
+     * Creates a new lifecycle service with the given dependencies.
+     *
+     * @param client                the Cycles API client
+     * @param retryEngine           the commit retry engine
+     * @param requestBuilderService the request builder service
+     * @param evaluator             the SpEL expression evaluator
+     */
     public CyclesLifecycleService(CyclesClient client,
                                   CommitRetryEngine retryEngine,
                                   CyclesRequestBuilderService requestBuilderService,
@@ -64,6 +72,7 @@ public class CyclesLifecycleService {
      * @param actionKind resolved action kind
      * @param actionName resolved action name
      * @return the result of the guarded action
+     * @throws Throwable if the guarded method or lifecycle operations fail
      */
     public Object executeWithReservation(ThrowingSupplier<Object> action,
                                          Cycles cycles,
@@ -367,8 +376,19 @@ public class CyclesLifecycleService {
         return ErrorCode.fromString(errorCodeStr);
     }
 
+    /**
+     * A supplier that may throw checked exceptions.
+     *
+     * @param <T> the result type
+     */
     @FunctionalInterface
     public interface ThrowingSupplier<T> {
+        /**
+         * Gets the result.
+         *
+         * @return the result
+         * @throws Throwable if unable to compute a result
+         */
         T get() throws Throwable;
     }
 }
