@@ -35,8 +35,11 @@ public class ReleaseResult {
         );
     }
 
+    /** Returns the release status. */
     public ReleaseStatus getStatus() { return status; }
+    /** Returns the amount released back to budget. */
     public Amount getReleased() { return released; }
+    /** Returns the updated balances after the release. */
     public List<Balance> getBalances() { return balances; }
 
     @Override

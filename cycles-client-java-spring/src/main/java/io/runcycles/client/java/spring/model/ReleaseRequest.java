@@ -16,7 +16,9 @@ public class ReleaseRequest {
         this.reason = builder.reason;
     }
 
+    /** Returns the idempotency key. */
     public String getIdempotencyKey() { return idempotencyKey; }
+    /** Returns the release reason. */
     public String getReason() { return reason; }
 
     /**
@@ -31,7 +33,11 @@ public class ReleaseRequest {
         return map;
     }
 
-    /** Creates a new {@code ReleaseRequest} builder. */
+    /**
+     * Creates a new {@code ReleaseRequest} builder.
+     *
+     * @return a new builder instance
+     */
     public static Builder builder() { return new Builder(); }
 
     /** Builder for constructing {@link ReleaseRequest} instances. */
@@ -39,8 +45,30 @@ public class ReleaseRequest {
         private String idempotencyKey;
         private String reason;
 
+        /** Creates a new, empty builder. */
+        Builder() {}
+
+        /**
+         * Sets the idempotency key.
+         *
+         * @param idempotencyKey the idempotency key
+         * @return this builder
+         */
         public Builder idempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; return this; }
+
+        /**
+         * Sets the release reason.
+         *
+         * @param reason the reason for releasing the reservation
+         * @return this builder
+         */
         public Builder reason(String reason) { this.reason = reason; return this; }
+
+        /**
+         * Builds a new {@link ReleaseRequest} from this builder's state.
+         *
+         * @return the constructed request
+         */
         public ReleaseRequest build() { return new ReleaseRequest(this); }
     }
 

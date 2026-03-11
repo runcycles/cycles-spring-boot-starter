@@ -13,7 +13,7 @@ import java.time.Duration;
  * {@link io.runcycles.client.java.spring.annotation.Cycles @Cycles} annotation
  * attribute is left blank.
  *
- * <h3>Minimal configuration</h3>
+ * <h4>Minimal configuration</h4>
  * <pre>
  * cycles.base-url=https://api.runcycles.io
  * cycles.api-key=your-api-key

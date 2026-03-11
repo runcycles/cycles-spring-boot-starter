@@ -5,6 +5,7 @@ package io.runcycles.client.java.spring.model;
  * Mirrors the spec's {@code CommitResponse.status: enum [COMMITTED]}.
  */
 public enum CommitStatus {
+    /** The reservation has been successfully committed. */
     COMMITTED;
 
     /**

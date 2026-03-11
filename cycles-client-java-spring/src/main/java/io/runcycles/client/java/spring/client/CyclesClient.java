@@ -96,32 +96,65 @@ public interface CyclesClient {
 
     // ---- Typed request DTO overloads ----
 
-    /** Typed overload for {@link #createReservation(Object)}. */
+    /**
+     * Typed overload for {@link #createReservation(Object)}.
+     *
+     * @param request the typed reservation request
+     * @return the API response containing the reservation result
+     */
     default CyclesResponse<Map<String, Object>> createReservation(ReservationCreateRequest request) {
         return createReservation((Object) request.toMap());
     }
 
-    /** Typed overload for {@link #commitReservation(String, Object)}. */
+    /**
+     * Typed overload for {@link #commitReservation(String, Object)}.
+     *
+     * @param reservationId the reservation identifier
+     * @param request       the typed commit request
+     * @return the API response containing the commit result
+     */
     default CyclesResponse<Map<String, Object>> commitReservation(String reservationId, CommitRequest request) {
         return commitReservation(reservationId, (Object) request.toMap());
     }
 
-    /** Typed overload for {@link #releaseReservation(String, Object)}. */
+    /**
+     * Typed overload for {@link #releaseReservation(String, Object)}.
+     *
+     * @param reservationId the reservation identifier
+     * @param request       the typed release request
+     * @return the API response containing the release result
+     */
     default CyclesResponse<Map<String, Object>> releaseReservation(String reservationId, ReleaseRequest request) {
         return releaseReservation(reservationId, (Object) request.toMap());
     }
 
-    /** Typed overload for {@link #extendReservation(String, Object)}. */
+    /**
+     * Typed overload for {@link #extendReservation(String, Object)}.
+     *
+     * @param reservationId the reservation identifier
+     * @param request       the typed extend request
+     * @return the API response containing the extend result
+     */
     default CyclesResponse<Map<String, Object>> extendReservation(String reservationId, ReservationExtendRequest request) {
         return extendReservation(reservationId, (Object) request.toMap());
     }
 
-    /** Typed overload for {@link #decide(Object)}. */
+    /**
+     * Typed overload for {@link #decide(Object)}.
+     *
+     * @param request the typed decision request
+     * @return the API response containing the decision result
+     */
     default CyclesResponse<Map<String, Object>> decide(DecisionRequest request) {
         return decide((Object) request.toMap());
     }
 
-    /** Typed overload for {@link #createEvent(Object)}. */
+    /**
+     * Typed overload for {@link #createEvent(Object)}.
+     *
+     * @param request the typed event creation request
+     * @return the API response containing the event result
+     */
     default CyclesResponse<Map<String, Object>> createEvent(EventCreateRequest request) {
         return createEvent((Object) request.toMap());
     }

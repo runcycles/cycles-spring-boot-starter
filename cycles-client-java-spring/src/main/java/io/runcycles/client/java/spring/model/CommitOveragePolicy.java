@@ -5,8 +5,11 @@ package io.runcycles.client.java.spring.model;
  * Mirrors the spec's {@code CommitOveragePolicy} enum.
  */
 public enum CommitOveragePolicy {
+    /** Reject the commit if actual exceeds reserved. */
     REJECT,
+    /** Allow if sufficient unreserved budget is available. */
     ALLOW_IF_AVAILABLE,
+    /** Allow and record overdraft debt. */
     ALLOW_WITH_OVERDRAFT;
 
     /**

@@ -5,9 +5,13 @@ package io.runcycles.client.java.spring.model;
  * Mirrors the server's {@code Enums.UnitEnum}.
  */
 public enum Unit {
+    /** US dollars in microcents (1 USD = 100,000,000 microcents). */
     USD_MICROCENTS,
+    /** Token-based units (e.g., LLM tokens). */
     TOKENS,
+    /** Abstract credit units. */
     CREDITS,
+    /** Risk point units for risk-based budgeting. */
     RISK_POINTS;
 
     /**

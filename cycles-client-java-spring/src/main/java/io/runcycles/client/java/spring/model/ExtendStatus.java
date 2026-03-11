@@ -5,6 +5,7 @@ package io.runcycles.client.java.spring.model;
  * Mirrors the spec's {@code ReservationExtendResponse.status: enum [ACTIVE]}.
  */
 public enum ExtendStatus {
+    /** The reservation remains active after the extension. */
     ACTIVE;
 
     /**

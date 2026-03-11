@@ -41,10 +41,15 @@ public class DecisionResult {
         );
     }
 
+    /** Returns the server's decision. */
     public Decision getDecision() { return decision; }
+    /** Returns the capability constraints, or {@code null} if none. */
     public Caps getCaps() { return caps; }
+    /** Returns the reason code for the decision, or {@code null}. */
     public String getReasonCode() { return reasonCode; }
+    /** Returns the suggested retry delay in milliseconds, or {@code null}. */
     public Integer getRetryAfterMs() { return retryAfterMs; }
+    /** Returns the list of affected budget scopes. */
     public List<String> getAffectedScopes() { return affectedScopes; }
 
     /** Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}. */

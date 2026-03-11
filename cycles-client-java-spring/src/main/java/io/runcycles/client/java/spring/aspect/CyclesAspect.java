@@ -23,10 +23,24 @@ public class CyclesAspect {
 
     private final CyclesLifecycleService lifecycleService;
 
+    /**
+     * Creates a new aspect backed by the given lifecycle service.
+     *
+     * @param lifecycleService the service orchestrating reserve/execute/commit
+     */
     public CyclesAspect(CyclesLifecycleService lifecycleService) {
         this.lifecycleService = lifecycleService;
     }
 
+    /**
+     * Intercepts methods annotated with {@code @Cycles} and wraps them in the
+     * reserve/execute/commit lifecycle.
+     *
+     * @param pjp    the join point representing the intercepted method
+     * @param cycles the annotation instance providing budget parameters
+     * @return the return value of the guarded method
+     * @throws Throwable if the guarded method or lifecycle operations fail
+     */
     @Around("@annotation(cycles)")
     public Object around(ProceedingJoinPoint pjp, Cycles cycles) throws Throwable {
         if (CyclesContextHolder.get() != null) {
