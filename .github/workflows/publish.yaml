@@ -32,6 +32,7 @@ jobs:
           gpg-passphrase: GPG_PASSPHRASE
 
       - name: Test release build without publishing
+        working-directory: cycles-client-java-spring
         run: mvn -B -Prelease clean verify
 
   publish:
@@ -62,4 +63,5 @@ jobs:
           gpg-passphrase: GPG_PASSPHRASE
 
       - name: Publish
+        working-directory: cycles-client-java-spring
         run: mvn -B -Prelease clean deploy
