@@ -10,11 +10,36 @@ import org.springframework.expression.spel.standard.SpelExpressionParser;
 
 import java.lang.reflect.Method;
 
+/**
+ * Evaluates SpEL expressions used in {@code @Cycles} annotations to compute
+ * estimated and actual usage amounts.
+ *
+ * <p>The evaluation context exposes:
+ * <ul>
+ *   <li>All method parameter names as SpEL variables</li>
+ *   <li>{@code #result} — the method return value (only available for {@code actual} expressions)</li>
+ *   <li>{@code #args} — the raw method arguments array</li>
+ *   <li>{@code #target} — the target bean instance</li>
+ * </ul>
+ *
+ * <p>Expressions must evaluate to a non-null, non-negative {@link Number}.
+ */
 public class CyclesExpressionEvaluator {
     private static final Logger LOG = LoggerFactory.getLogger(CyclesExpressionEvaluator.class);
     private final ExpressionParser parser = new SpelExpressionParser();
     private final ParameterNameDiscoverer discoverer = new DefaultParameterNameDiscoverer();
 
+    /**
+     * Evaluates a SpEL expression to a non-negative {@code long} value.
+     *
+     * @param expression the SpEL expression string
+     * @param method     the annotated method (used for parameter name discovery)
+     * @param args       the method invocation arguments
+     * @param result     the method return value, or {@code null} for pre-execution evaluation
+     * @param target     the bean instance on which the method was invoked
+     * @return the evaluated amount as a non-negative {@code long}
+     * @throws IllegalArgumentException if the expression evaluates to null or a negative value
+     */
     public long evaluate(String expression,
                          Method method,
                          Object[] args,

@@ -24,6 +24,20 @@ import reactor.netty.http.client.HttpClient;
 
 import java.util.Map;
 
+/**
+ * Spring Boot auto-configuration for the Cycles client library.
+ *
+ * <p>Registers all required beans — HTTP client, {@link CyclesClient}, expression
+ * evaluator, value resolution, request builder, commit retry engine, lifecycle
+ * service, and AOP aspect — unless the application provides its own.
+ *
+ * <p>Activated automatically via
+ * {@code META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports}.
+ *
+ * @see CyclesProperties
+ * @see CyclesClient
+ * @see CyclesAspect
+ */
 @AutoConfiguration
 @EnableConfigurationProperties(CyclesProperties.class)
 public class CyclesAutoConfiguration {

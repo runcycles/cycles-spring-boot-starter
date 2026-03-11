@@ -7,6 +7,22 @@ import io.runcycles.client.java.spring.util.ValidationUtils;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Resolves Cycles subject field values using a three-tier precedence chain:
+ *
+ * <ol>
+ *   <li><strong>Annotation</strong> — value set directly on the {@code @Cycles} attribute</li>
+ *   <li><strong>Configuration</strong> — value from {@link CyclesProperties} ({@code cycles.*})</li>
+ *   <li><strong>Resolver bean</strong> — a {@link CyclesFieldResolver} looked up by field name</li>
+ * </ol>
+ *
+ * <p>The first non-blank value wins. This allows applications to set global defaults
+ * in configuration while overriding per-method via the annotation or dynamically via
+ * resolver beans.
+ *
+ * @see CyclesFieldResolver
+ * @see CyclesProperties
+ */
 public class CyclesValueResolutionService {
 
     private final CyclesProperties properties;
@@ -17,6 +33,13 @@ public class CyclesValueResolutionService {
         this.properties = properties;
     }
 
+    /**
+     * Resolves a subject field value using the annotation &rarr; config &rarr; resolver chain.
+     *
+     * @param fieldName       the subject field name (e.g. {@code "tenant"})
+     * @param annotationValue the value from the {@code @Cycles} annotation, may be blank
+     * @return the resolved value, or {@code null} if none of the sources provide one
+     */
     public String resolve(String fieldName, String annotationValue) {
 
         // 1. Annotation override (fast path)

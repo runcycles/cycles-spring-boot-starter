@@ -10,6 +10,22 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.*;
 
+/**
+ * In-memory {@link CommitRetryEngine} implementation using a single-thread
+ * {@link ScheduledExecutorService} with exponential backoff.
+ *
+ * <p>Retry behaviour is controlled by {@link CyclesProperties.Retry}:
+ * <ul>
+ *   <li>{@code enabled} — master switch (default {@code true})</li>
+ *   <li>{@code maxAttempts} — maximum number of retry attempts (default {@code 5})</li>
+ *   <li>{@code initialDelay} — delay before the first retry (default {@code 500ms})</li>
+ *   <li>{@code multiplier} — backoff multiplier (default {@code 2.0})</li>
+ *   <li>{@code maxDelay} — upper bound on delay between retries (default {@code 30s})</li>
+ * </ul>
+ *
+ * <p>Only retryable errors (transport failures, 5xx responses) trigger further
+ * attempts; non-retryable 4xx errors are logged and abandoned.
+ */
 public class InMemoryCommitRetryEngine implements CommitRetryEngine {
 
     private static final Logger LOG = LoggerFactory.getLogger(InMemoryCommitRetryEngine.class);

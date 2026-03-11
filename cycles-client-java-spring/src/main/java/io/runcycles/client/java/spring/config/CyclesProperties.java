@@ -4,6 +4,21 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
 
+/**
+ * Configuration properties for the Cycles Spring Boot starter, bound to the
+ * {@code cycles.*} namespace.
+ *
+ * <p>Includes connection settings ({@code base-url}, {@code api-key}), HTTP timeouts,
+ * commit retry policy, and default subject field values used when the corresponding
+ * {@link io.runcycles.client.java.spring.annotation.Cycles @Cycles} annotation
+ * attribute is left blank.
+ *
+ * <h3>Minimal configuration</h3>
+ * <pre>
+ * cycles.base-url=https://api.runcycles.io
+ * cycles.api-key=your-api-key
+ * </pre>
+ */
 @ConfigurationProperties(prefix = "cycles")
 public class CyclesProperties {
 
@@ -20,6 +35,7 @@ public class CyclesProperties {
     private Http http = new Http();
     private Retry retry = new Retry();
 
+    /** HTTP connection and read timeout settings for the Cycles API client. */
     public static class Http {
         private Duration connectTimeout = Duration.ofSeconds(2);
         private Duration readTimeout = Duration.ofSeconds(5);
@@ -29,6 +45,7 @@ public class CyclesProperties {
         public void setReadTimeout(Duration readTimeout) { this.readTimeout = readTimeout; }
     }
 
+    /** Exponential-backoff retry settings for failed commit operations. */
     public static class Retry {
         private boolean enabled = true;
         private int maxAttempts = 5;
