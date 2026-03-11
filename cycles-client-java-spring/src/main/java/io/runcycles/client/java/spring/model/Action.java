@@ -18,6 +18,12 @@ public class Action {
         this.tags = tags;
     }
 
+    /**
+     * Deserializes an {@code Action} from a raw API response map.
+     *
+     * @param map the action section of the response, or {@code null}
+     * @return the parsed {@code Action}, or {@code null} if the input is {@code null}
+     */
     @SuppressWarnings("unchecked")
     public static Action fromMap(Map<String, Object> map) {
         if (map == null) return null;
@@ -32,6 +38,11 @@ public class Action {
     public String getName() { return name; }
     public List<String> getTags() { return tags; }
 
+    /**
+     * Serializes this action to a map suitable for the API request body.
+     *
+     * @return a mutable map of non-null fields
+     */
     public Map<String, Object> toMap() {
         Map<String, Object> map = new java.util.HashMap<>();
         if (kind != null) map.put("kind", kind);

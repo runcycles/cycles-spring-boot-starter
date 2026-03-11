@@ -36,6 +36,12 @@ public class ReservationSummaryResult {
         this.affectedScopes = affectedScopes;
     }
 
+    /**
+     * Deserializes a {@code ReservationSummaryResult} from a raw API response map.
+     *
+     * @param map the response body map, or {@code null}
+     * @return the parsed result, or {@code null} if the input is {@code null}
+     */
     @SuppressWarnings("unchecked")
     public static ReservationSummaryResult fromMap(Map<String, Object> map) {
         if (map == null) return null;
@@ -64,9 +70,13 @@ public class ReservationSummaryResult {
     public String getScopePath() { return scopePath; }
     public List<String> getAffectedScopes() { return affectedScopes; }
 
+    /** Returns {@code true} if the reservation status is {@code ACTIVE}. */
     public boolean isActive() { return status == ReservationStatus.ACTIVE; }
+    /** Returns {@code true} if the reservation status is {@code COMMITTED}. */
     public boolean isCommitted() { return status == ReservationStatus.COMMITTED; }
+    /** Returns {@code true} if the reservation status is {@code RELEASED}. */
     public boolean isReleased() { return status == ReservationStatus.RELEASED; }
+    /** Returns {@code true} if the reservation status is {@code EXPIRED}. */
     public boolean isExpired() { return status == ReservationStatus.EXPIRED; }
 
     @Override

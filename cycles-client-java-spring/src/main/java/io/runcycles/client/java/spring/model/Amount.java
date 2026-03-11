@@ -16,6 +16,12 @@ public class Amount {
         this.amount = amount;
     }
 
+    /**
+     * Deserializes an {@code Amount} from a raw API response map.
+     *
+     * @param map the amount section of the response, or {@code null}
+     * @return the parsed {@code Amount}, or {@code null} if the input is {@code null}
+     */
     public static Amount fromMap(Map<String, Object> map) {
         if (map == null) return null;
         Unit unit = map.get("unit") instanceof String s ? Unit.fromString(s) : null;
@@ -23,6 +29,11 @@ public class Amount {
         return new Amount(unit, amount);
     }
 
+    /**
+     * Serializes this amount to a map suitable for the API request body.
+     *
+     * @return a mutable map of non-null fields
+     */
     public Map<String, Object> toMap() {
         Map<String, Object> map = new HashMap<>();
         if (unit != null) map.put("unit", unit.name());

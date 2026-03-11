@@ -9,6 +9,12 @@ public enum CommitOveragePolicy {
     ALLOW_IF_AVAILABLE,
     ALLOW_WITH_OVERDRAFT;
 
+    /**
+     * Parses a {@code CommitOveragePolicy} from its string representation.
+     *
+     * @param value the enum name, or {@code null}
+     * @return the matching policy, or {@code null} if unrecognized or {@code null}
+     */
     public static CommitOveragePolicy fromString(String value) {
         if (value == null) return null;
         try {

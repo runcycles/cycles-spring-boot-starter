@@ -31,17 +31,33 @@ public class CyclesMetrics {
     public Map<String, Object> getCustom() { return custom; }
     public void setCustom(Map<String, Object> custom) { this.custom = custom; }
 
+    /**
+     * Adds a custom metric entry, initializing the custom map if needed.
+     *
+     * @param key   the metric key
+     * @param value the metric value
+     */
     public void putCustom(String key, Object value) {
         if (custom == null) { custom = new HashMap<>(); }
         custom.put(key, value);
     }
 
+    /**
+     * Returns {@code true} if no standard or custom metrics have been set.
+     *
+     * @return whether all fields are {@code null} or empty
+     */
     public boolean isEmpty() {
         return tokensInput == null && tokensOutput == null
                 && latencyMs == null && modelVersion == null
                 && (custom == null || custom.isEmpty());
     }
 
+    /**
+     * Serializes these metrics to a map suitable for the API request body.
+     *
+     * @return a mutable map of non-null fields
+     */
     public Map<String, Object> toMap() {
         Map<String, Object> map = new HashMap<>();
         if (tokensInput != null) map.put("tokens_input", tokensInput);

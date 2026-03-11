@@ -37,6 +37,11 @@ public class EventCreateRequest {
     public Long getClientTimeMs() { return clientTimeMs; }
     public Map<String, Object> getMetadata() { return metadata; }
 
+    /**
+     * Serializes this request to a map suitable for the API request body.
+     *
+     * @return a mutable map of non-null fields
+     */
     public Map<String, Object> toMap() {
         Map<String, Object> map = new HashMap<>();
         if (idempotencyKey != null) map.put("idempotency_key", idempotencyKey);
@@ -50,8 +55,10 @@ public class EventCreateRequest {
         return map;
     }
 
+    /** Creates a new {@code EventCreateRequest} builder. */
     public static Builder builder() { return new Builder(); }
 
+    /** Builder for constructing {@link EventCreateRequest} instances. */
     public static class Builder {
         private String idempotencyKey;
         private Subject subject;

@@ -22,6 +22,11 @@ public class ReservationExtendRequest {
     public Long getExtendByMs() { return extendByMs; }
     public Map<String, Object> getMetadata() { return metadata; }
 
+    /**
+     * Serializes this request to a map suitable for the API request body.
+     *
+     * @return a mutable map of non-null fields
+     */
     public Map<String, Object> toMap() {
         Map<String, Object> map = new HashMap<>();
         if (idempotencyKey != null) map.put("idempotency_key", idempotencyKey);
@@ -30,8 +35,10 @@ public class ReservationExtendRequest {
         return map;
     }
 
+    /** Creates a new {@code ReservationExtendRequest} builder. */
     public static Builder builder() { return new Builder(); }
 
+    /** Builder for constructing {@link ReservationExtendRequest} instances. */
     public static class Builder {
         private String idempotencyKey;
         private Long extendByMs;

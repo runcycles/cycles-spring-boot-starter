@@ -19,6 +19,12 @@ public class EventResult {
         this.balances = balances;
     }
 
+    /**
+     * Deserializes an {@code EventResult} from a raw API response map.
+     *
+     * @param map the response body map, or {@code null}
+     * @return the parsed result, or {@code null} if the input is {@code null}
+     */
     @SuppressWarnings("unchecked")
     public static EventResult fromMap(Map<String, Object> map) {
         if (map == null) return null;

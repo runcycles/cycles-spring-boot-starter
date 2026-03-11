@@ -23,6 +23,12 @@ public class DecisionResult {
         this.affectedScopes = affectedScopes;
     }
 
+    /**
+     * Deserializes a {@code DecisionResult} from a raw API response map.
+     *
+     * @param map the response body map, or {@code null}
+     * @return the parsed result, or {@code null} if the input is {@code null}
+     */
     @SuppressWarnings("unchecked")
     public static DecisionResult fromMap(Map<String, Object> map) {
         if (map == null) return null;
@@ -41,7 +47,9 @@ public class DecisionResult {
     public Integer getRetryAfterMs() { return retryAfterMs; }
     public List<String> getAffectedScopes() { return affectedScopes; }
 
+    /** Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}. */
     public boolean isAllowed() { return decision == Decision.ALLOW || decision == Decision.ALLOW_WITH_CAPS; }
+    /** Returns {@code true} if the decision is {@code DENY}. */
     public boolean isDenied() { return decision == Decision.DENY; }
 
     @Override

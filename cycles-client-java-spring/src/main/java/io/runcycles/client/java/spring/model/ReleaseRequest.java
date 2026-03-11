@@ -19,6 +19,11 @@ public class ReleaseRequest {
     public String getIdempotencyKey() { return idempotencyKey; }
     public String getReason() { return reason; }
 
+    /**
+     * Serializes this request to a map suitable for the API request body.
+     *
+     * @return a mutable map of non-null fields
+     */
     public Map<String, Object> toMap() {
         Map<String, Object> map = new HashMap<>();
         if (idempotencyKey != null) map.put("idempotency_key", idempotencyKey);
@@ -26,8 +31,10 @@ public class ReleaseRequest {
         return map;
     }
 
+    /** Creates a new {@code ReleaseRequest} builder. */
     public static Builder builder() { return new Builder(); }
 
+    /** Builder for constructing {@link ReleaseRequest} instances. */
     public static class Builder {
         private String idempotencyKey;
         private String reason;

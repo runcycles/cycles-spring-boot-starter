@@ -28,6 +28,11 @@ public class DecisionRequest {
     public Amount getEstimate() { return estimate; }
     public Map<String, Object> getMetadata() { return metadata; }
 
+    /**
+     * Serializes this request to a map suitable for the API request body.
+     *
+     * @return a mutable map of non-null fields
+     */
     public Map<String, Object> toMap() {
         Map<String, Object> map = new HashMap<>();
         if (idempotencyKey != null) map.put("idempotency_key", idempotencyKey);
@@ -38,8 +43,10 @@ public class DecisionRequest {
         return map;
     }
 
+    /** Creates a new {@code DecisionRequest} builder. */
     public static Builder builder() { return new Builder(); }
 
+    /** Builder for constructing {@link DecisionRequest} instances. */
     public static class Builder {
         private String idempotencyKey;
         private Subject subject;
