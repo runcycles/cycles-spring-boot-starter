@@ -5,9 +5,13 @@ package io.runcycles.client.java.spring.model;
  * Mirrors the server's {@code Enums.ReservationStatus} and the spec's {@code ReservationStatus} enum.
  */
 public enum ReservationStatus {
+    /** The reservation is currently active and can be committed, extended, or released. */
     ACTIVE,
+    /** The reservation has been finalized with a commit. */
     COMMITTED,
+    /** The reservation has been explicitly released without committing. */
     RELEASED,
+    /** The reservation expired before being committed or released. */
     EXPIRED;
 
     /**

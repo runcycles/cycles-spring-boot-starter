@@ -42,6 +42,7 @@ import java.util.Map;
 @EnableConfigurationProperties(CyclesProperties.class)
 public class CyclesAutoConfiguration {
 
+    /** Configures the WebClient used for Cycles API communication. */
     @Bean
     @ConditionalOnMissingBean(name = "cyclesWebClient")
     public WebClient cyclesWebClient(CyclesProperties props) {
@@ -62,18 +63,21 @@ public class CyclesAutoConfiguration {
                 .build();
     }
 
+    /** Registers the default {@link CyclesClient} backed by WebClient. */
     @Bean
     @ConditionalOnMissingBean
     public CyclesClient cyclesClient(@Qualifier("cyclesWebClient") WebClient cyclesWebClient) {
         return new DefaultCyclesClient(cyclesWebClient);
     }
 
+    /** Registers the SpEL expression evaluator for {@code @Cycles} attributes. */
     @Bean
     @ConditionalOnMissingBean
     public CyclesExpressionEvaluator evaluator() {
         return new CyclesExpressionEvaluator();
     }
 
+    /** Registers the three-tier value resolution service. */
     @Bean
     @ConditionalOnMissingBean
     public CyclesValueResolutionService cyclesValueResolutionService(
@@ -83,6 +87,7 @@ public class CyclesAutoConfiguration {
         return new CyclesValueResolutionService(resolvers, properties);
     }
 
+    /** Registers the request payload builder service. */
     @Bean
     @ConditionalOnMissingBean
     public CyclesRequestBuilderService cyclesRequestBuilderService(
@@ -91,12 +96,14 @@ public class CyclesAutoConfiguration {
         return new CyclesRequestBuilderService(resolutionService);
     }
 
+    /** Registers the exponential-backoff retry engine for failed commits. */
     @Bean
     @ConditionalOnMissingBean
     public CommitRetryEngine retryEngine(CyclesClient client, CyclesProperties props) {
         return new InMemoryCommitRetryEngine(client, props);
     }
 
+    /** Registers the lifecycle service orchestrating reserve/execute/commit. */
     @Bean
     @ConditionalOnMissingBean
     public CyclesLifecycleService cyclesLifecycleService(CyclesClient client,
@@ -106,6 +113,7 @@ public class CyclesAutoConfiguration {
         return new CyclesLifecycleService(client, retryEngine, requestBuilderService, evaluator);
     }
 
+    /** Registers the AOP aspect that intercepts {@code @Cycles}-annotated methods. */
     @Bean
     public CyclesAspect aspect(CyclesLifecycleService lifecycleService) {
         return new CyclesAspect(lifecycleService);

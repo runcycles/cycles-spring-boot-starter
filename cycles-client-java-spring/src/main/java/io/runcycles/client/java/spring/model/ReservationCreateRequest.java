@@ -30,14 +30,23 @@ public class ReservationCreateRequest {
         this.metadata = builder.metadata;
     }
 
+    /** Returns the idempotency key. */
     public String getIdempotencyKey() { return idempotencyKey; }
+    /** Returns the subject. */
     public Subject getSubject() { return subject; }
+    /** Returns the action. */
     public Action getAction() { return action; }
+    /** Returns the estimated amount. */
     public Amount getEstimate() { return estimate; }
+    /** Returns the TTL in milliseconds. */
     public Long getTtlMs() { return ttlMs; }
+    /** Returns the grace period in milliseconds. */
     public Long getGracePeriodMs() { return gracePeriodMs; }
+    /** Returns the overage policy. */
     public CommitOveragePolicy getOveragePolicy() { return overagePolicy; }
+    /** Returns whether this is a dry-run request. */
     public Boolean getDryRun() { return dryRun; }
+    /** Returns the custom metadata. */
     public Map<String, Object> getMetadata() { return metadata; }
 
     /**
@@ -59,7 +68,11 @@ public class ReservationCreateRequest {
         return map;
     }
 
-    /** Creates a new {@code ReservationCreateRequest} builder. */
+    /**
+     * Creates a new {@code ReservationCreateRequest} builder.
+     *
+     * @return a new builder instance
+     */
     public static Builder builder() { return new Builder(); }
 
     /** Builder for constructing {@link ReservationCreateRequest} instances. */
@@ -74,15 +87,86 @@ public class ReservationCreateRequest {
         private Boolean dryRun = false;
         private Map<String, Object> metadata;
 
+        /** Creates a new builder with default values. */
+        Builder() {}
+
+        /**
+         * Sets the idempotency key.
+         *
+         * @param idempotencyKey the idempotency key
+         * @return this builder
+         */
         public Builder idempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; return this; }
+
+        /**
+         * Sets the subject.
+         *
+         * @param subject the subject identifying the entity
+         * @return this builder
+         */
         public Builder subject(Subject subject) { this.subject = subject; return this; }
+
+        /**
+         * Sets the action.
+         *
+         * @param action the action being performed
+         * @return this builder
+         */
         public Builder action(Action action) { this.action = action; return this; }
+
+        /**
+         * Sets the estimated amount.
+         *
+         * @param estimate the estimated budget amount
+         * @return this builder
+         */
         public Builder estimate(Amount estimate) { this.estimate = estimate; return this; }
+
+        /**
+         * Sets the TTL in milliseconds.
+         *
+         * @param ttlMs the time-to-live in milliseconds
+         * @return this builder
+         */
         public Builder ttlMs(Long ttlMs) { this.ttlMs = ttlMs; return this; }
+
+        /**
+         * Sets the grace period in milliseconds.
+         *
+         * @param gracePeriodMs the grace period in milliseconds
+         * @return this builder
+         */
         public Builder gracePeriodMs(Long gracePeriodMs) { this.gracePeriodMs = gracePeriodMs; return this; }
+
+        /**
+         * Sets the overage policy.
+         *
+         * @param overagePolicy the commit overage policy
+         * @return this builder
+         */
         public Builder overagePolicy(CommitOveragePolicy overagePolicy) { this.overagePolicy = overagePolicy; return this; }
+
+        /**
+         * Sets whether this is a dry-run request.
+         *
+         * @param dryRun {@code true} to simulate without persisting
+         * @return this builder
+         */
         public Builder dryRun(Boolean dryRun) { this.dryRun = dryRun; return this; }
+
+        /**
+         * Sets the custom metadata.
+         *
+         * @param metadata the metadata map
+         * @return this builder
+         */
         public Builder metadata(Map<String, Object> metadata) { this.metadata = metadata; return this; }
+
+        /**
+         * Builds a new {@link ReservationCreateRequest} from this builder's state.
+         *
+         * @return the constructed request
+         */
         public ReservationCreateRequest build() { return new ReservationCreateRequest(this); }
     }
 

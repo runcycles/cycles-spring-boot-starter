@@ -47,10 +47,15 @@ public class Caps {
         );
     }
 
+    /** Returns the maximum token budget, or {@code null} if unconstrained. */
     public Integer getMaxTokens() { return maxTokens; }
+    /** Returns the maximum remaining steps, or {@code null} if unconstrained. */
     public Integer getMaxStepsRemaining() { return maxStepsRemaining; }
+    /** Returns the tool allowlist, or {@code null} if no allowlist is set. */
     public List<String> getToolAllowlist() { return toolAllowlist; }
+    /** Returns the tool denylist, or {@code null} if no denylist is set. */
     public List<String> getToolDenylist() { return toolDenylist; }
+    /** Returns the cooldown period in milliseconds, or {@code null} if no cooldown. */
     public Integer getCooldownMs() { return cooldownMs; }
 
     /**

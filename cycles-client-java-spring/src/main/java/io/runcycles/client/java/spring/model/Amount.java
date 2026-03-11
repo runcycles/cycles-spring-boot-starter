@@ -11,6 +11,12 @@ public class Amount {
     private final Unit unit;
     private final Long amount;
 
+    /**
+     * Creates a new amount.
+     *
+     * @param unit   the unit of measure
+     * @param amount the quantity in the given unit
+     */
     public Amount(Unit unit, Long amount) {
         this.unit = unit;
         this.amount = amount;
@@ -41,7 +47,9 @@ public class Amount {
         return map;
     }
 
+    /** Returns the unit of measure. */
     public Unit getUnit() { return unit; }
+    /** Returns the quantity. */
     public Long getAmount() { return amount; }
 
     @Override

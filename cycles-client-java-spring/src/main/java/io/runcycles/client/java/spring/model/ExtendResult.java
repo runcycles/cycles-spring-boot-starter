@@ -35,8 +35,11 @@ public class ExtendResult {
         );
     }
 
+    /** Returns the extend status. */
     public ExtendStatus getStatus() { return status; }
+    /** Returns the new expiration time in epoch milliseconds. */
     public Long getExpiresAtMs() { return expiresAtMs; }
+    /** Returns the updated balances after the extension. */
     public List<Balance> getBalances() { return balances; }
 
     @Override

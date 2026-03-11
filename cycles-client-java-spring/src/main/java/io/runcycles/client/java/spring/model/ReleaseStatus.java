@@ -5,6 +5,7 @@ package io.runcycles.client.java.spring.model;
  * Mirrors the spec's {@code ReleaseResponse.status: enum [RELEASED]}.
  */
 public enum ReleaseStatus {
+    /** The reservation has been successfully released. */
     RELEASED;
 
     /**

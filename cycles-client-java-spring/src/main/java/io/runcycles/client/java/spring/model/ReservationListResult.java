@@ -47,8 +47,11 @@ public class ReservationListResult {
         );
     }
 
+    /** Returns the list of reservation summaries. */
     public List<ReservationSummaryResult> getReservations() { return reservations; }
+    /** Returns whether more results are available for pagination. */
     public Boolean getHasMore() { return hasMore; }
+    /** Returns the cursor for fetching the next page. */
     public String getNextCursor() { return nextCursor; }
 
     @Override

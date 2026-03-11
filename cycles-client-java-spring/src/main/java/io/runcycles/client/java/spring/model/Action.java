@@ -12,6 +12,13 @@ public class Action {
     private final String name;
     private final List<String> tags;
 
+    /**
+     * Creates a new action.
+     *
+     * @param kind the action category
+     * @param name the action identifier
+     * @param tags optional tags for filtering and reporting
+     */
     public Action(String kind, String name, List<String> tags) {
         this.kind = kind;
         this.name = name;
@@ -34,8 +41,11 @@ public class Action {
         );
     }
 
+    /** Returns the action category. */
     public String getKind() { return kind; }
+    /** Returns the action identifier. */
     public String getName() { return name; }
+    /** Returns the action tags. */
     public List<String> getTags() { return tags; }
 
     /**

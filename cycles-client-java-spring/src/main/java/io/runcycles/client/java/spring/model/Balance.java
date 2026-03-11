@@ -74,14 +74,23 @@ public class Balance {
         return result;
     }
 
+    /** Returns the scope identifier (e.g., tenant, workspace). */
     public String getScope() { return scope; }
+    /** Returns the fully-qualified scope path. */
     public String getScopePath() { return scopePath; }
+    /** Returns the remaining balance (may be negative in overdraft). */
     public SignedAmount getRemaining() { return remaining; }
+    /** Returns the total amount currently reserved. */
     public Amount getReserved() { return reserved; }
+    /** Returns the total amount spent (committed). */
     public Amount getSpent() { return spent; }
+    /** Returns the total allocated budget. */
     public Amount getAllocated() { return allocated; }
+    /** Returns the outstanding debt amount. */
     public Amount getDebt() { return debt; }
+    /** Returns the overdraft limit for this scope. */
     public Amount getOverdraftLimit() { return overdraftLimit; }
+    /** Returns whether the scope has exceeded its budget limit. */
     public Boolean getIsOverLimit() { return isOverLimit; }
 
     @Override

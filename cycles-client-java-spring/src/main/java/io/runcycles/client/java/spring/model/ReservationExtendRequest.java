@@ -18,8 +18,11 @@ public class ReservationExtendRequest {
         this.metadata = builder.metadata;
     }
 
+    /** Returns the idempotency key. */
     public String getIdempotencyKey() { return idempotencyKey; }
+    /** Returns the extension duration in milliseconds. */
     public Long getExtendByMs() { return extendByMs; }
+    /** Returns the custom metadata. */
     public Map<String, Object> getMetadata() { return metadata; }
 
     /**
@@ -35,7 +38,11 @@ public class ReservationExtendRequest {
         return map;
     }
 
-    /** Creates a new {@code ReservationExtendRequest} builder. */
+    /**
+     * Creates a new {@code ReservationExtendRequest} builder.
+     *
+     * @return a new builder instance
+     */
     public static Builder builder() { return new Builder(); }
 
     /** Builder for constructing {@link ReservationExtendRequest} instances. */
@@ -44,9 +51,38 @@ public class ReservationExtendRequest {
         private Long extendByMs;
         private Map<String, Object> metadata;
 
+        /** Creates a new, empty builder. */
+        Builder() {}
+
+        /**
+         * Sets the idempotency key.
+         *
+         * @param idempotencyKey the idempotency key
+         * @return this builder
+         */
         public Builder idempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; return this; }
+
+        /**
+         * Sets the extension duration in milliseconds.
+         *
+         * @param extendByMs the duration to extend the reservation by
+         * @return this builder
+         */
         public Builder extendByMs(Long extendByMs) { this.extendByMs = extendByMs; return this; }
+
+        /**
+         * Sets the custom metadata.
+         *
+         * @param metadata the metadata map
+         * @return this builder
+         */
         public Builder metadata(Map<String, Object> metadata) { this.metadata = metadata; return this; }
+
+        /**
+         * Builds a new {@link ReservationExtendRequest} from this builder's state.
+         *
+         * @return the constructed request
+         */
         public ReservationExtendRequest build() { return new ReservationExtendRequest(this); }
     }
 

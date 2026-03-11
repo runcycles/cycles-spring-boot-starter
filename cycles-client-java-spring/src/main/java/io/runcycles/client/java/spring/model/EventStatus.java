@@ -5,6 +5,7 @@ package io.runcycles.client.java.spring.model;
  * Mirrors the spec's {@code EventCreateResponse.status: enum [APPLIED]}.
  */
 public enum EventStatus {
+    /** The event has been successfully applied. */
     APPLIED;
 
     /**

@@ -28,13 +28,21 @@ public class EventCreateRequest {
         this.metadata = builder.metadata;
     }
 
+    /** Returns the idempotency key. */
     public String getIdempotencyKey() { return idempotencyKey; }
+    /** Returns the subject. */
     public Subject getSubject() { return subject; }
+    /** Returns the action. */
     public Action getAction() { return action; }
+    /** Returns the actual usage amount. */
     public Amount getActual() { return actual; }
+    /** Returns the overage policy. */
     public CommitOveragePolicy getOveragePolicy() { return overagePolicy; }
+    /** Returns the metrics to record with this event. */
     public CyclesMetrics getMetrics() { return metrics; }
+    /** Returns the client-side timestamp in epoch milliseconds. */
     public Long getClientTimeMs() { return clientTimeMs; }
+    /** Returns the custom metadata. */
     public Map<String, Object> getMetadata() { return metadata; }
 
     /**
@@ -55,7 +63,11 @@ public class EventCreateRequest {
         return map;
     }
 
-    /** Creates a new {@code EventCreateRequest} builder. */
+    /**
+     * Creates a new {@code EventCreateRequest} builder.
+     *
+     * @return a new builder instance
+     */
     public static Builder builder() { return new Builder(); }
 
     /** Builder for constructing {@link EventCreateRequest} instances. */
@@ -69,14 +81,78 @@ public class EventCreateRequest {
         private Long clientTimeMs;
         private Map<String, Object> metadata;
 
+        /** Creates a new builder with default values. */
+        Builder() {}
+
+        /**
+         * Sets the idempotency key.
+         *
+         * @param idempotencyKey the idempotency key
+         * @return this builder
+         */
         public Builder idempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; return this; }
+
+        /**
+         * Sets the subject.
+         *
+         * @param subject the subject identifying the entity
+         * @return this builder
+         */
         public Builder subject(Subject subject) { this.subject = subject; return this; }
+
+        /**
+         * Sets the action.
+         *
+         * @param action the action being performed
+         * @return this builder
+         */
         public Builder action(Action action) { this.action = action; return this; }
+
+        /**
+         * Sets the actual usage amount.
+         *
+         * @param actual the actual amount consumed
+         * @return this builder
+         */
         public Builder actual(Amount actual) { this.actual = actual; return this; }
+
+        /**
+         * Sets the overage policy.
+         *
+         * @param overagePolicy the commit overage policy
+         * @return this builder
+         */
         public Builder overagePolicy(CommitOveragePolicy overagePolicy) { this.overagePolicy = overagePolicy; return this; }
+
+        /**
+         * Sets the metrics to record with this event.
+         *
+         * @param metrics the metrics
+         * @return this builder
+         */
         public Builder metrics(CyclesMetrics metrics) { this.metrics = metrics; return this; }
+
+        /**
+         * Sets the client-side timestamp.
+         *
+         * @param clientTimeMs the timestamp in epoch milliseconds
+         * @return this builder
+         */
         public Builder clientTimeMs(Long clientTimeMs) { this.clientTimeMs = clientTimeMs; return this; }
+
+        /**
+         * Sets the custom metadata.
+         *
+         * @param metadata the metadata map
+         * @return this builder
+         */
         public Builder metadata(Map<String, Object> metadata) { this.metadata = metadata; return this; }
+
+        /**
+         * Builds a new {@link EventCreateRequest} from this builder's state.
+         *
+         * @return the constructed request
+         */
         public EventCreateRequest build() { return new EventCreateRequest(this); }
     }
 

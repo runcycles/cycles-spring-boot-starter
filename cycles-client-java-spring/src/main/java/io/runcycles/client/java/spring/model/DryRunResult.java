@@ -35,13 +35,21 @@ public class DryRunResult {
         this.retryAfterMs = retryAfterMs;
     }
 
+    /** Returns the server's decision. */
     public Decision getDecision() { return decision; }
+    /** Returns the capability constraints, or {@code null} if none. */
     public Caps getCaps() { return caps; }
+    /** Returns the list of affected budget scopes. */
     public List<String> getAffectedScopes() { return affectedScopes; }
+    /** Returns the fully-qualified scope path. */
     public String getScopePath() { return scopePath; }
+    /** Returns the would-be reserved amount. */
     public Amount getReserved() { return reserved; }
+    /** Returns the current balances. */
     public List<Balance> getBalances() { return balances; }
+    /** Returns the reason code for the decision, or {@code null}. */
     public String getReasonCode() { return reasonCode; }
+    /** Returns the suggested retry delay in milliseconds, or {@code null}. */
     public Integer getRetryAfterMs() { return retryAfterMs; }
 
     /** Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}. */

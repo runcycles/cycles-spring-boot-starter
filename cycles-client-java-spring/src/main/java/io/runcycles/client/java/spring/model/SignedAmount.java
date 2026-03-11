@@ -10,6 +10,12 @@ public class SignedAmount {
     private final Unit unit;
     private final Long amount;
 
+    /**
+     * Creates a new signed amount.
+     *
+     * @param unit   the unit of measure
+     * @param amount the quantity (may be negative)
+     */
     public SignedAmount(Unit unit, Long amount) {
         this.unit = unit;
         this.amount = amount;
@@ -28,7 +34,9 @@ public class SignedAmount {
         return new SignedAmount(unit, amount);
     }
 
+    /** Returns the unit of measure. */
     public Unit getUnit() { return unit; }
+    /** Returns the quantity (may be negative). */
     public Long getAmount() { return amount; }
 
     @Override

@@ -38,9 +38,13 @@ public class CommitResult {
         );
     }
 
+    /** Returns the commit status. */
     public CommitStatus getStatus() { return status; }
+    /** Returns the amount actually charged. */
     public Amount getCharged() { return charged; }
+    /** Returns the amount released back to budget. */
     public Amount getReleased() { return released; }
+    /** Returns the updated balances after the commit. */
     public List<Balance> getBalances() { return balances; }
 
     @Override

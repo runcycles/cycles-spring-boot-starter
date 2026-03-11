@@ -59,15 +59,25 @@ public class ReservationSummaryResult {
         );
     }
 
+    /** Returns the reservation ID. */
     public String getReservationId() { return reservationId; }
+    /** Returns the reservation lifecycle status. */
     public ReservationStatus getStatus() { return status; }
+    /** Returns the idempotency key. */
     public String getIdempotencyKey() { return idempotencyKey; }
+    /** Returns the subject that owns this reservation. */
     public Subject getSubject() { return subject; }
+    /** Returns the action being budgeted. */
     public Action getAction() { return action; }
+    /** Returns the reserved amount. */
     public Amount getReserved() { return reserved; }
+    /** Returns the creation time in epoch milliseconds. */
     public Long getCreatedAtMs() { return createdAtMs; }
+    /** Returns the expiration time in epoch milliseconds. */
     public Long getExpiresAtMs() { return expiresAtMs; }
+    /** Returns the fully-qualified scope path. */
     public String getScopePath() { return scopePath; }
+    /** Returns the list of affected budget scopes. */
     public List<String> getAffectedScopes() { return affectedScopes; }
 
     /** Returns {@code true} if the reservation status is {@code ACTIVE}. */
