@@ -41,20 +41,48 @@ public class DecisionResult {
         );
     }
 
-    /** Returns the server's decision. */
+    /**
+     * Returns the server's decision.
+     *
+     * @return The server's decision
+     */
     public Decision getDecision() { return decision; }
-    /** Returns the capability constraints, or {@code null} if none. */
+    /**
+     * Returns the capability constraints, or {@code null} if none.
+     *
+     * @return The capability constraints, or {@code null} if none
+     */
     public Caps getCaps() { return caps; }
-    /** Returns the reason code for the decision, or {@code null}. */
+    /**
+     * Returns the reason code for the decision, or {@code null}.
+     *
+     * @return The reason code for the decision, or {@code null}
+     */
     public String getReasonCode() { return reasonCode; }
-    /** Returns the suggested retry delay in milliseconds, or {@code null}. */
+    /**
+     * Returns the suggested retry delay in milliseconds, or {@code null}.
+     *
+     * @return The suggested retry delay in milliseconds, or {@code null}
+     */
     public Integer getRetryAfterMs() { return retryAfterMs; }
-    /** Returns the list of affected budget scopes. */
+    /**
+     * Returns the list of affected budget scopes.
+     *
+     * @return The list of affected budget scopes
+     */
     public List<String> getAffectedScopes() { return affectedScopes; }
 
-    /** Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}. */
+    /**
+     * Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}.
+     *
+     * @return {@code true} if the decision is {@code allow} or {@code allow_with_caps}
+     */
     public boolean isAllowed() { return decision == Decision.ALLOW || decision == Decision.ALLOW_WITH_CAPS; }
-    /** Returns {@code true} if the decision is {@code DENY}. */
+    /**
+     * Returns {@code true} if the decision is {@code DENY}.
+     *
+     * @return {@code true} if the decision is {@code deny}
+     */
     public boolean isDenied() { return decision == Decision.DENY; }
 
     @Override

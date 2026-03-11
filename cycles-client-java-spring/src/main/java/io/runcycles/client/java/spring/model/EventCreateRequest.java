@@ -28,21 +28,53 @@ public class EventCreateRequest {
         this.metadata = builder.metadata;
     }
 
-    /** Returns the idempotency key. */
+    /**
+     * Returns the idempotency key.
+     *
+     * @return The idempotency key
+     */
     public String getIdempotencyKey() { return idempotencyKey; }
-    /** Returns the subject. */
+    /**
+     * Returns the subject.
+     *
+     * @return The subject
+     */
     public Subject getSubject() { return subject; }
-    /** Returns the action. */
+    /**
+     * Returns the action.
+     *
+     * @return The action
+     */
     public Action getAction() { return action; }
-    /** Returns the actual usage amount. */
+    /**
+     * Returns the actual usage amount.
+     *
+     * @return The actual usage amount
+     */
     public Amount getActual() { return actual; }
-    /** Returns the overage policy. */
+    /**
+     * Returns the overage policy.
+     *
+     * @return The overage policy
+     */
     public CommitOveragePolicy getOveragePolicy() { return overagePolicy; }
-    /** Returns the metrics to record with this event. */
+    /**
+     * Returns the metrics to record with this event.
+     *
+     * @return The metrics to record with this event
+     */
     public CyclesMetrics getMetrics() { return metrics; }
-    /** Returns the client-side timestamp in epoch milliseconds. */
+    /**
+     * Returns the client-side timestamp in epoch milliseconds.
+     *
+     * @return The client-side timestamp in epoch milliseconds
+     */
     public Long getClientTimeMs() { return clientTimeMs; }
-    /** Returns the custom metadata. */
+    /**
+     * Returns the custom metadata.
+     *
+     * @return The custom metadata
+     */
     public Map<String, Object> getMetadata() { return metadata; }
 
     /**

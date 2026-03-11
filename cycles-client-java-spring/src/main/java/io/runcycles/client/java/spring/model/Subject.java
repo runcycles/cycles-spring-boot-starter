@@ -133,19 +133,47 @@ public class Subject {
         );
     }
 
-    /** Returns the tenant identifier. */
+    /**
+     * Returns the tenant identifier.
+     *
+     * @return The tenant identifier
+     */
     public String getTenant() { return tenant; }
-    /** Returns the workspace identifier. */
+    /**
+     * Returns the workspace identifier.
+     *
+     * @return The workspace identifier
+     */
     public String getWorkspace() { return workspace; }
-    /** Returns the application identifier. */
+    /**
+     * Returns the application identifier.
+     *
+     * @return The application identifier
+     */
     public String getApp() { return app; }
-    /** Returns the workflow identifier. */
+    /**
+     * Returns the workflow identifier.
+     *
+     * @return The workflow identifier
+     */
     public String getWorkflow() { return workflow; }
-    /** Returns the agent identifier. */
+    /**
+     * Returns the agent identifier.
+     *
+     * @return The agent identifier
+     */
     public String getAgent() { return agent; }
-    /** Returns the toolset identifier. */
+    /**
+     * Returns the toolset identifier.
+     *
+     * @return The toolset identifier
+     */
     public String getToolset() { return toolset; }
-    /** Returns the custom dimensions map. */
+    /**
+     * Returns the custom dimensions map.
+     *
+     * @return The custom dimensions map
+     */
     public Map<String, String> getDimensions() { return dimensions; }
 
     /**

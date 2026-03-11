@@ -30,23 +30,59 @@ public class ReservationCreateRequest {
         this.metadata = builder.metadata;
     }
 
-    /** Returns the idempotency key. */
+    /**
+     * Returns the idempotency key.
+     *
+     * @return The idempotency key
+     */
     public String getIdempotencyKey() { return idempotencyKey; }
-    /** Returns the subject. */
+    /**
+     * Returns the subject.
+     *
+     * @return The subject
+     */
     public Subject getSubject() { return subject; }
-    /** Returns the action. */
+    /**
+     * Returns the action.
+     *
+     * @return The action
+     */
     public Action getAction() { return action; }
-    /** Returns the estimated amount. */
+    /**
+     * Returns the estimated amount.
+     *
+     * @return The estimated amount
+     */
     public Amount getEstimate() { return estimate; }
-    /** Returns the TTL in milliseconds. */
+    /**
+     * Returns the TTL in milliseconds.
+     *
+     * @return The ttl in milliseconds
+     */
     public Long getTtlMs() { return ttlMs; }
-    /** Returns the grace period in milliseconds. */
+    /**
+     * Returns the grace period in milliseconds.
+     *
+     * @return The grace period in milliseconds
+     */
     public Long getGracePeriodMs() { return gracePeriodMs; }
-    /** Returns the overage policy. */
+    /**
+     * Returns the overage policy.
+     *
+     * @return The overage policy
+     */
     public CommitOveragePolicy getOveragePolicy() { return overagePolicy; }
-    /** Returns whether this is a dry-run request. */
+    /**
+     * Returns whether this is a dry-run request.
+     *
+     * @return Whether this is a dry-run request
+     */
     public Boolean getDryRun() { return dryRun; }
-    /** Returns the custom metadata. */
+    /**
+     * Returns the custom metadata.
+     *
+     * @return The custom metadata
+     */
     public Map<String, Object> getMetadata() { return metadata; }
 
     /**

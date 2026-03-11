@@ -39,13 +39,29 @@ public class ErrorResponse {
         return new ErrorResponse(errorCode, message, requestId, details);
     }
 
-    /** Returns the structured error code. */
+    /**
+     * Returns the structured error code.
+     *
+     * @return The structured error code
+     */
     public ErrorCode getErrorCode() { return errorCode; }
-    /** Returns the human-readable error message. */
+    /**
+     * Returns the human-readable error message.
+     *
+     * @return The human-readable error message
+     */
     public String getMessage() { return message; }
-    /** Returns the server-assigned request ID for debugging. */
+    /**
+     * Returns the server-assigned request ID for debugging.
+     *
+     * @return The server-assigned request id for debugging
+     */
     public String getRequestId() { return requestId; }
-    /** Returns additional error details, or {@code null}. */
+    /**
+     * Returns additional error details, or {@code null}.
+     *
+     * @return Additional error details, or {@code null}
+     */
     public Map<String, Object> getDetails() { return details; }
 
     /**

@@ -41,11 +41,23 @@ public class Action {
         );
     }
 
-    /** Returns the action category. */
+    /**
+     * Returns the action category.
+     *
+     * @return The action category
+     */
     public String getKind() { return kind; }
-    /** Returns the action identifier. */
+    /**
+     * Returns the action identifier.
+     *
+     * @return The action identifier
+     */
     public String getName() { return name; }
-    /** Returns the action tags. */
+    /**
+     * Returns the action tags.
+     *
+     * @return The action tags
+     */
     public List<String> getTags() { return tags; }
 
     /**

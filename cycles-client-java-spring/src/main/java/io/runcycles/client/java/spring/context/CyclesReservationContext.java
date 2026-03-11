@@ -70,23 +70,59 @@ public class CyclesReservationContext {
         this.balances = balances;
     }
 
-    /** Returns the server-assigned reservation identifier. */
+    /**
+     * Returns the server-assigned reservation identifier.
+     *
+     * @return The server-assigned reservation identifier
+     */
     public String getReservationId() { return reservationId; }
-    /** Returns the estimated amount that was reserved. */
+    /**
+     * Returns the estimated amount that was reserved.
+     *
+     * @return The estimated amount that was reserved
+     */
     public long getEstimate() { return estimate; }
-    /** Returns the budget decision returned by the server. */
+    /**
+     * Returns the budget decision returned by the server.
+     *
+     * @return The budget decision returned by the server
+     */
     public Decision getDecision() { return decision; }
-    /** Returns the applicable budget caps, or {@code null}. */
+    /**
+     * Returns the applicable budget caps, or {@code null}.
+     *
+     * @return The applicable budget caps, or {@code null}
+     */
     public Caps getCaps() { return caps; }
-    /** Returns the reservation expiration timestamp in epoch milliseconds, or {@code null}. */
+    /**
+     * Returns the reservation expiration timestamp in epoch milliseconds, or {@code null}.
+     *
+     * @return The reservation expiration timestamp in epoch milliseconds, or {@code null}
+     */
     public Long getExpiresAtMs() { return expiresAtMs; }
-    /** Returns the budget scopes affected by this reservation. */
+    /**
+     * Returns the budget scopes affected by this reservation.
+     *
+     * @return The budget scopes affected by this reservation
+     */
     public List<String> getAffectedScopes() { return affectedScopes; }
-    /** Returns the scope path for this reservation. */
+    /**
+     * Returns the scope path for this reservation.
+     *
+     * @return The scope path for this reservation
+     */
     public String getScopePath() { return scopePath; }
-    /** Returns the reserved amount. */
+    /**
+     * Returns the reserved amount.
+     *
+     * @return The reserved amount
+     */
     public Amount getReserved() { return reserved; }
-    /** Returns the balance snapshots after reservation. */
+    /**
+     * Returns the balance snapshots after reservation.
+     *
+     * @return The balance snapshots after reservation
+     */
     public List<Balance> getBalances() { return balances; }
 
     /**
@@ -122,7 +158,11 @@ public class CyclesReservationContext {
      * @param metrics the metrics to attach to the commit
      */
     public void setMetrics(CyclesMetrics metrics) { this.metrics = metrics; }
-    /** Returns the metrics to include in the commit, or {@code null}. */
+    /**
+     * Returns the metrics to include in the commit, or {@code null}.
+     *
+     * @return The metrics to include in the commit, or {@code null}
+     */
     public CyclesMetrics getMetrics() { return metrics; }
 
     /**
@@ -133,6 +173,10 @@ public class CyclesReservationContext {
      * @param commitMetadata the metadata map to attach to the commit
      */
     public void setCommitMetadata(Map<String, Object> commitMetadata) { this.commitMetadata = commitMetadata; }
-    /** Returns the commit metadata, or {@code null}. */
+    /**
+     * Returns the commit metadata, or {@code null}.
+     *
+     * @return The commit metadata, or {@code null}
+     */
     public Map<String, Object> getCommitMetadata() { return commitMetadata; }
 }

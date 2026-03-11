@@ -59,34 +59,90 @@ public class ReservationSummaryResult {
         );
     }
 
-    /** Returns the reservation ID. */
+    /**
+     * Returns the reservation ID.
+     *
+     * @return The reservation id
+     */
     public String getReservationId() { return reservationId; }
-    /** Returns the reservation lifecycle status. */
+    /**
+     * Returns the reservation lifecycle status.
+     *
+     * @return The reservation lifecycle status
+     */
     public ReservationStatus getStatus() { return status; }
-    /** Returns the idempotency key. */
+    /**
+     * Returns the idempotency key.
+     *
+     * @return The idempotency key
+     */
     public String getIdempotencyKey() { return idempotencyKey; }
-    /** Returns the subject that owns this reservation. */
+    /**
+     * Returns the subject that owns this reservation.
+     *
+     * @return The subject that owns this reservation
+     */
     public Subject getSubject() { return subject; }
-    /** Returns the action being budgeted. */
+    /**
+     * Returns the action being budgeted.
+     *
+     * @return The action being budgeted
+     */
     public Action getAction() { return action; }
-    /** Returns the reserved amount. */
+    /**
+     * Returns the reserved amount.
+     *
+     * @return The reserved amount
+     */
     public Amount getReserved() { return reserved; }
-    /** Returns the creation time in epoch milliseconds. */
+    /**
+     * Returns the creation time in epoch milliseconds.
+     *
+     * @return The creation time in epoch milliseconds
+     */
     public Long getCreatedAtMs() { return createdAtMs; }
-    /** Returns the expiration time in epoch milliseconds. */
+    /**
+     * Returns the expiration time in epoch milliseconds.
+     *
+     * @return The expiration time in epoch milliseconds
+     */
     public Long getExpiresAtMs() { return expiresAtMs; }
-    /** Returns the fully-qualified scope path. */
+    /**
+     * Returns the fully-qualified scope path.
+     *
+     * @return The fully-qualified scope path
+     */
     public String getScopePath() { return scopePath; }
-    /** Returns the list of affected budget scopes. */
+    /**
+     * Returns the list of affected budget scopes.
+     *
+     * @return The list of affected budget scopes
+     */
     public List<String> getAffectedScopes() { return affectedScopes; }
 
-    /** Returns {@code true} if the reservation status is {@code ACTIVE}. */
+    /**
+     * Returns {@code true} if the reservation status is {@code ACTIVE}.
+     *
+     * @return {@code true} if the reservation status is {@code active}
+     */
     public boolean isActive() { return status == ReservationStatus.ACTIVE; }
-    /** Returns {@code true} if the reservation status is {@code COMMITTED}. */
+    /**
+     * Returns {@code true} if the reservation status is {@code COMMITTED}.
+     *
+     * @return {@code true} if the reservation status is {@code committed}
+     */
     public boolean isCommitted() { return status == ReservationStatus.COMMITTED; }
-    /** Returns {@code true} if the reservation status is {@code RELEASED}. */
+    /**
+     * Returns {@code true} if the reservation status is {@code RELEASED}.
+     *
+     * @return {@code true} if the reservation status is {@code released}
+     */
     public boolean isReleased() { return status == ReservationStatus.RELEASED; }
-    /** Returns {@code true} if the reservation status is {@code EXPIRED}. */
+    /**
+     * Returns {@code true} if the reservation status is {@code EXPIRED}.
+     *
+     * @return {@code true} if the reservation status is {@code expired}
+     */
     public boolean isExpired() { return status == ReservationStatus.EXPIRED; }
 
     @Override

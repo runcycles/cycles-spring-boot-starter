@@ -20,13 +20,29 @@ public class CommitRequest {
         this.metadata = builder.metadata;
     }
 
-    /** Returns the idempotency key. */
+    /**
+     * Returns the idempotency key.
+     *
+     * @return The idempotency key
+     */
     public String getIdempotencyKey() { return idempotencyKey; }
-    /** Returns the actual usage amount. */
+    /**
+     * Returns the actual usage amount.
+     *
+     * @return The actual usage amount
+     */
     public Amount getActual() { return actual; }
-    /** Returns the metrics to record with this commit. */
+    /**
+     * Returns the metrics to record with this commit.
+     *
+     * @return The metrics to record with this commit
+     */
     public CyclesMetrics getMetrics() { return metrics; }
-    /** Returns the custom metadata. */
+    /**
+     * Returns the custom metadata.
+     *
+     * @return The custom metadata
+     */
     public Map<String, Object> getMetadata() { return metadata; }
 
     /**

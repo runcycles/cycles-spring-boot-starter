@@ -35,11 +35,23 @@ public class ExtendResult {
         );
     }
 
-    /** Returns the extend status. */
+    /**
+     * Returns the extend status.
+     *
+     * @return The extend status
+     */
     public ExtendStatus getStatus() { return status; }
-    /** Returns the new expiration time in epoch milliseconds. */
+    /**
+     * Returns the new expiration time in epoch milliseconds.
+     *
+     * @return The new expiration time in epoch milliseconds
+     */
     public Long getExpiresAtMs() { return expiresAtMs; }
-    /** Returns the updated balances after the extension. */
+    /**
+     * Returns the updated balances after the extension.
+     *
+     * @return The updated balances after the extension
+     */
     public List<Balance> getBalances() { return balances; }
 
     @Override

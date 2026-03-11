@@ -14,21 +14,77 @@ public class CyclesMetrics {
     private String modelVersion;
     private Map<String, Object> custom;
 
+    /** Creates a new, empty metrics instance. */
     public CyclesMetrics() {}
 
+    /**
+     * Returns the input token count.
+     *
+     * @return the input tokens, or {@code null}
+     */
     public Integer getTokensInput() { return tokensInput; }
+
+    /**
+     * Sets the input token count.
+     *
+     * @param tokensInput the input tokens
+     */
     public void setTokensInput(Integer tokensInput) { this.tokensInput = tokensInput; }
 
+    /**
+     * Returns the output token count.
+     *
+     * @return the output tokens, or {@code null}
+     */
     public Integer getTokensOutput() { return tokensOutput; }
+
+    /**
+     * Sets the output token count.
+     *
+     * @param tokensOutput the output tokens
+     */
     public void setTokensOutput(Integer tokensOutput) { this.tokensOutput = tokensOutput; }
 
+    /**
+     * Returns the latency in milliseconds.
+     *
+     * @return the latency, or {@code null}
+     */
     public Integer getLatencyMs() { return latencyMs; }
+
+    /**
+     * Sets the latency in milliseconds.
+     *
+     * @param latencyMs the latency
+     */
     public void setLatencyMs(Integer latencyMs) { this.latencyMs = latencyMs; }
 
+    /**
+     * Returns the model version string.
+     *
+     * @return the model version, or {@code null}
+     */
     public String getModelVersion() { return modelVersion; }
+
+    /**
+     * Sets the model version string.
+     *
+     * @param modelVersion the model version
+     */
     public void setModelVersion(String modelVersion) { this.modelVersion = modelVersion; }
 
+    /**
+     * Returns the custom metrics map.
+     *
+     * @return the custom metrics, or {@code null}
+     */
     public Map<String, Object> getCustom() { return custom; }
+
+    /**
+     * Sets the custom metrics map.
+     *
+     * @param custom the custom metrics
+     */
     public void setCustom(Map<String, Object> custom) { this.custom = custom; }
 
     /**

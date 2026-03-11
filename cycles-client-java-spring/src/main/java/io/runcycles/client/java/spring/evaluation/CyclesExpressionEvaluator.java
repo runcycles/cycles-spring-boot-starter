@@ -25,6 +25,10 @@ import java.lang.reflect.Method;
  * <p>Expressions must evaluate to a non-null, non-negative {@link Number}.
  */
 public class CyclesExpressionEvaluator {
+
+    /** Creates a new expression evaluator. */
+    public CyclesExpressionEvaluator() {}
+
     private static final Logger LOG = LoggerFactory.getLogger(CyclesExpressionEvaluator.class);
     private final ExpressionParser parser = new SpelExpressionParser();
     private final ParameterNameDiscoverer discoverer = new DefaultParameterNameDiscoverer();
