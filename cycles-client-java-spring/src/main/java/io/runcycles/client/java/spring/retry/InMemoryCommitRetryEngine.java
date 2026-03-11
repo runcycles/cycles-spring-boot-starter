@@ -34,6 +34,12 @@ public class InMemoryCommitRetryEngine implements CommitRetryEngine {
     private final CyclesProperties.Retry props;
     private final ScheduledExecutorService executor;
 
+    /**
+     * Creates a new retry engine with the given client and configuration.
+     *
+     * @param client     the Cycles API client for retrying commits
+     * @param properties the Cycles configuration properties containing retry settings
+     */
     public InMemoryCommitRetryEngine(CyclesClient client, CyclesProperties properties) {
         this.client = client;
         this.props = properties.getRetry();

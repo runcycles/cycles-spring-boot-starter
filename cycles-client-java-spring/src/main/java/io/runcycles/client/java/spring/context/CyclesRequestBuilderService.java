@@ -36,6 +36,11 @@ public class CyclesRequestBuilderService {
 
     private final CyclesValueResolutionService cyclesValueResolutionService;
 
+    /**
+     * Creates a new request builder service.
+     *
+     * @param cyclesValueResolutionService the value resolution service for subject fields
+     */
     public CyclesRequestBuilderService(CyclesValueResolutionService cyclesValueResolutionService) {
         this.cyclesValueResolutionService = cyclesValueResolutionService;
     }

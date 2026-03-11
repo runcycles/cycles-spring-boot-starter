@@ -11,9 +11,13 @@ package io.runcycles.client.java.spring.model;
  * {@link #isReservationExpired()}) are provided for common error conditions.
  */
 public class CyclesProtocolException extends RuntimeException {
+    /** The structured error code. */
     private final ErrorCode errorCode;
+    /** The server-provided reason code. */
     private final String reasonCode;
+    /** The HTTP status code. */
     private final int httpStatus;
+    /** The suggested retry delay in milliseconds. */
     private final Integer retryAfterMs;
 
     /**

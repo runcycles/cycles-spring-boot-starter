@@ -19,6 +19,18 @@ public class DryRunResult {
     private final String reasonCode;
     private final Integer retryAfterMs;
 
+    /**
+     * Creates a new dry-run result with the given evaluation data.
+     *
+     * @param decision       the server's budget decision
+     * @param caps           capability constraints, or {@code null}
+     * @param affectedScopes the list of affected budget scopes
+     * @param scopePath      the fully-qualified scope path
+     * @param reserved       the amount that would be reserved
+     * @param balances       the current balances
+     * @param reasonCode     the server-provided reason code, or {@code null}
+     * @param retryAfterMs   suggested retry delay in milliseconds, or {@code null}
+     */
     public DryRunResult(Decision decision, Caps caps,
                         List<String> affectedScopes, String scopePath,
                         Amount reserved,

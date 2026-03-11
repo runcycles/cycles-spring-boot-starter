@@ -28,6 +28,12 @@ public class CyclesValueResolutionService {
     private final CyclesProperties properties;
     private final ConcurrentHashMap<String, CyclesFieldResolver> resolverMap;
 
+    /**
+     * Creates a new value resolution service.
+     *
+     * @param resolvers  the available field resolver beans, keyed by bean name
+     * @param properties the Cycles configuration properties
+     */
     public CyclesValueResolutionService(Map<String, CyclesFieldResolver> resolvers, CyclesProperties properties) {
         resolverMap = new ConcurrentHashMap<>(resolvers);
         this.properties = properties;

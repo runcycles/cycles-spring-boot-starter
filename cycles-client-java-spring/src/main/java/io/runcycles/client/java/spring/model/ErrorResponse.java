@@ -20,8 +20,11 @@ public class ErrorResponse {
     }
 
     /**
-     * Parse an ErrorResponse from the raw response body map.
-     * Returns null if the body does not contain a recognizable error envelope.
+     * Parses an {@code ErrorResponse} from the raw response body map.
+     *
+     * @param body the response body map, or {@code null}
+     * @return the parsed error response, or {@code null} if the body does not
+     *         contain a recognizable error envelope
      */
     @SuppressWarnings("unchecked")
     public static ErrorResponse fromMap(Map<String, Object> body) {
@@ -65,7 +68,10 @@ public class ErrorResponse {
     public Map<String, Object> getDetails() { return details; }
 
     /**
-     * Convert this error response into a CyclesProtocolException.
+     * Converts this error response into a {@link CyclesProtocolException}.
+     *
+     * @param httpStatus the HTTP status code from the response
+     * @return the protocol exception
      */
     public CyclesProtocolException toException(int httpStatus) {
         return new CyclesProtocolException(
