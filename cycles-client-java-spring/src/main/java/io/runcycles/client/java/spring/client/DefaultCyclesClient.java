@@ -26,6 +26,11 @@ public class DefaultCyclesClient implements CyclesClient {
 
     private final WebClient webClient;
 
+    /**
+     * Creates a new client backed by the given WebClient.
+     *
+     * @param webClient the pre-configured WebClient for Cycles API calls
+     */
     public DefaultCyclesClient(WebClient webClient) {
         this.webClient = webClient;
     }
