@@ -36,6 +36,12 @@ public class ReservationResult {
         this.balances = balances;
     }
 
+    /**
+     * Deserializes a {@code ReservationResult} from a raw API response map.
+     *
+     * @param map the response body map, or {@code null}
+     * @return the parsed result, or {@code null} if the input is {@code null}
+     */
     @SuppressWarnings("unchecked")
     public static ReservationResult fromMap(Map<String, Object> map) {
         if (map == null) return null;
@@ -64,7 +70,9 @@ public class ReservationResult {
     public Integer getRetryAfterMs() { return retryAfterMs; }
     public List<Balance> getBalances() { return balances; }
 
+    /** Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}. */
     public boolean isAllowed() { return decision == Decision.ALLOW || decision == Decision.ALLOW_WITH_CAPS; }
+    /** Returns {@code true} if the decision is {@code DENY}. */
     public boolean isDenied() { return decision == Decision.DENY; }
 
     @Override

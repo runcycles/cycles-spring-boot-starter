@@ -9,6 +9,21 @@ import io.runcycles.client.java.spring.model.Decision;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Holds the state of an active Cycles reservation during the execution of a
+ * {@code @Cycles}-annotated method.
+ *
+ * <p>Accessible via {@link CyclesContextHolder#get()} from within guarded methods.
+ * Application code can:
+ * <ul>
+ *   <li>Inspect the {@linkplain #getDecision() decision} and {@linkplain #getCaps() caps}</li>
+ *   <li>Attach {@linkplain #setMetrics(CyclesMetrics) metrics} for the commit</li>
+ *   <li>Attach {@linkplain #setCommitMetadata(Map) metadata} for the commit</li>
+ *   <li>Check if the reservation {@linkplain #isExpiringSoon(long) is about to expire}</li>
+ * </ul>
+ *
+ * @see CyclesContextHolder
+ */
 public class CyclesReservationContext {
 
     private final String reservationId;

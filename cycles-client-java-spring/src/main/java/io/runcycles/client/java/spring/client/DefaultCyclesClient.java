@@ -11,6 +11,14 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.lang.reflect.Method;
 import java.util.Map;
 
+/**
+ * Default {@link CyclesClient} implementation backed by Spring {@link WebClient}.
+ *
+ * <p>Communicates with the Cycles API over HTTP, automatically extracting idempotency
+ * keys from request bodies and mapping responses into {@link CyclesResponse} instances.
+ * Transport errors are captured rather than thrown, allowing callers to handle them
+ * uniformly via {@link CyclesResponse#isTransportError()}.
+ */
 public class DefaultCyclesClient implements CyclesClient {
     private static final Logger LOG = LoggerFactory.getLogger(DefaultCyclesClient.class);
     private static final ParameterizedTypeReference<Map<String, Object>> MAP_TYPE =

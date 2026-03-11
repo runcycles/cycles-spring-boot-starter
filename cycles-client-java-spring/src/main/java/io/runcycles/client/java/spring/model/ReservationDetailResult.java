@@ -43,6 +43,12 @@ public class ReservationDetailResult {
         this.metadata = metadata;
     }
 
+    /**
+     * Deserializes a {@code ReservationDetailResult} from a raw API response map.
+     *
+     * @param map the response body map, or {@code null}
+     * @return the parsed result, or {@code null} if the input is {@code null}
+     */
     @SuppressWarnings("unchecked")
     public static ReservationDetailResult fromMap(Map<String, Object> map) {
         if (map == null) return null;
@@ -77,9 +83,13 @@ public class ReservationDetailResult {
     public List<String> getAffectedScopes() { return affectedScopes; }
     public Map<String, Object> getMetadata() { return metadata; }
 
+    /** Returns {@code true} if the reservation status is {@code ACTIVE}. */
     public boolean isActive() { return status == ReservationStatus.ACTIVE; }
+    /** Returns {@code true} if the reservation status is {@code COMMITTED}. */
     public boolean isCommitted() { return status == ReservationStatus.COMMITTED; }
+    /** Returns {@code true} if the reservation status is {@code RELEASED}. */
     public boolean isReleased() { return status == ReservationStatus.RELEASED; }
+    /** Returns {@code true} if the reservation status is {@code EXPIRED}. */
     public boolean isExpired() { return status == ReservationStatus.EXPIRED; }
 
     @Override

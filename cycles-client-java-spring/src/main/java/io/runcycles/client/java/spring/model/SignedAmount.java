@@ -15,6 +15,12 @@ public class SignedAmount {
         this.amount = amount;
     }
 
+    /**
+     * Deserializes a {@code SignedAmount} from a raw API response map.
+     *
+     * @param map the signed-amount section of the response, or {@code null}
+     * @return the parsed {@code SignedAmount}, or {@code null} if the input is {@code null}
+     */
     public static SignedAmount fromMap(Map<String, Object> map) {
         if (map == null) return null;
         Unit unit = map.get("unit") instanceof String s ? Unit.fromString(s) : null;

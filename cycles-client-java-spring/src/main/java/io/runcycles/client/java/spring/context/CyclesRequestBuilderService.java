@@ -9,6 +9,19 @@ import io.runcycles.client.java.spring.util.ValidationUtils;
 
 import java.util.*;
 
+/**
+ * Builds validated Cycles API request payloads from {@code @Cycles} annotation values
+ * and runtime parameters.
+ *
+ * <p>Responsible for assembling the subject, action, estimate/actual, and optional
+ * fields (TTL, grace period, overage policy, dimensions, metrics, metadata) into
+ * the {@code Map<String, Object>} bodies expected by
+ * {@link io.runcycles.client.java.spring.client.CyclesClient}. All protocol-level
+ * validations (mandatory fields, length limits, unit enum, overage policy enum) are
+ * enforced here.
+ *
+ * @see io.runcycles.client.java.spring.annotation.Cycles
+ */
 public class CyclesRequestBuilderService {
 
     private static final Set<String> VALID_OVERAGE_POLICIES =
@@ -27,6 +40,17 @@ public class CyclesRequestBuilderService {
         this.cyclesValueResolutionService = cyclesValueResolutionService;
     }
 
+    /**
+     * Builds the request body for creating a new reservation.
+     *
+     * @param cycles          the annotation providing subject, action, and policy configuration
+     * @param estimatedAmount the estimated usage amount (must be &ge; 0)
+     * @param actionKind      the action category (e.g. class name)
+     * @param actionName      the action identifier (e.g. method name)
+     * @param metadata        optional metadata to include, or {@code null}
+     * @return a mutable map representing the JSON request body
+     * @throws CyclesProtocolException if validation fails
+     */
     public Map<String, Object> buildReservation(Cycles cycles, long estimatedAmount,
                                                  String actionKind, String actionName,
                                                  Map<String, Object> metadata) {
@@ -75,6 +99,14 @@ public class CyclesRequestBuilderService {
         return body;
     }
 
+    /**
+     * Builds the request body for extending a reservation's TTL.
+     *
+     * @param extendByMs the number of milliseconds to extend (1 to 86,400,000)
+     * @param metadata   optional metadata, or {@code null}
+     * @return a mutable map representing the JSON request body
+     * @throws CyclesProtocolException if {@code extendByMs} is out of range
+     */
     public Map<String, Object> buildExtend(long extendByMs, Map<String, Object> metadata) {
         if (extendByMs < 1 || extendByMs > 86400000) {
             throw new CyclesProtocolException("extend_by_ms must be between 1 and 86400000, got: " + extendByMs);
@@ -88,6 +120,12 @@ public class CyclesRequestBuilderService {
         return body;
     }
 
+    /**
+     * Builds the request body for releasing a reservation.
+     *
+     * @param reason an optional human-readable release reason
+     * @return a mutable map representing the JSON request body
+     */
     public Map<String, Object> buildRelease(String reason) {
         Map<String, Object> body = new HashMap<>();
         body.put(Constants.IDEMPOTENCY_KEY, UUID.randomUUID().toString());
@@ -95,6 +133,15 @@ public class CyclesRequestBuilderService {
         return body;
     }
 
+    /**
+     * Builds the request body for committing a reservation.
+     *
+     * @param cycles       the annotation providing unit configuration
+     * @param actualAmount the actual usage amount (must be &ge; 0)
+     * @param metrics      optional metrics to include, or {@code null}
+     * @param metadata     optional metadata, or {@code null}
+     * @return a mutable map representing the JSON request body
+     */
     public Map<String, Object> buildCommit(Cycles cycles, long actualAmount,
                                             CyclesMetrics metrics, Map<String, Object> metadata) {
         Objects.requireNonNull(cycles, "Cycles annotation must not be null");
@@ -113,6 +160,17 @@ public class CyclesRequestBuilderService {
         return body;
     }
 
+    /**
+     * Builds the request body for a preflight decision check (no reservation created).
+     *
+     * @param cycles          the annotation providing subject, action, and policy configuration
+     * @param estimatedAmount the estimated usage amount (must be &ge; 0)
+     * @param actionKind      the action category
+     * @param actionName      the action identifier
+     * @param metadata        optional metadata, or {@code null}
+     * @return a mutable map representing the JSON request body
+     * @throws CyclesProtocolException if validation fails
+     */
     public Map<String, Object> buildDecision(Cycles cycles, long estimatedAmount,
                                               String actionKind, String actionName,
                                               Map<String, Object> metadata) {
@@ -138,6 +196,19 @@ public class CyclesRequestBuilderService {
         return body;
     }
 
+    /**
+     * Builds the request body for a standalone accounting event (no reservation).
+     *
+     * @param cycles       the annotation providing subject, action, and policy configuration
+     * @param actualAmount the actual usage amount (must be &ge; 0)
+     * @param actionKind   the action category
+     * @param actionName   the action identifier
+     * @param metrics      optional metrics, or {@code null}
+     * @param clientTimeMs optional client-side timestamp in epoch millis, or {@code null}
+     * @param metadata     optional metadata, or {@code null}
+     * @return a mutable map representing the JSON request body
+     * @throws CyclesProtocolException if validation fails
+     */
     public Map<String, Object> buildEvent(Cycles cycles, long actualAmount,
                                            String actionKind, String actionName,
                                            CyclesMetrics metrics, Long clientTimeMs,

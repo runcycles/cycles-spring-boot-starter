@@ -10,6 +10,12 @@ public enum Unit {
     CREDITS,
     RISK_POINTS;
 
+    /**
+     * Parses a {@code Unit} from its string representation.
+     *
+     * @param value the enum name, or {@code null}
+     * @return the matching unit, or {@code null} if unrecognized or {@code null}
+     */
     public static Unit fromString(String value) {
         if (value == null) return null;
         try {

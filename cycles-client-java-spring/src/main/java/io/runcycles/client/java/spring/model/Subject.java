@@ -29,8 +29,10 @@ public class Subject {
         this.dimensions = dimensions;
     }
 
+    /** Creates a new {@code Subject} builder. */
     public static Builder builder() { return new Builder(); }
 
+    /** Builder for constructing {@link Subject} instances. */
     public static class Builder {
         private String tenant;
         private String workspace;
@@ -50,6 +52,12 @@ public class Subject {
         public Subject build() { return new Subject(tenant, workspace, app, workflow, agent, toolset, dimensions); }
     }
 
+    /**
+     * Deserializes a {@code Subject} from a raw API response map.
+     *
+     * @param map the subject section of the response, or {@code null}
+     * @return the parsed {@code Subject}, or {@code null} if the input is {@code null}
+     */
     @SuppressWarnings("unchecked")
     public static Subject fromMap(Map<String, Object> map) {
         if (map == null) return null;
@@ -72,6 +80,11 @@ public class Subject {
     public String getToolset() { return toolset; }
     public Map<String, String> getDimensions() { return dimensions; }
 
+    /**
+     * Serializes this subject to a map suitable for the API request body.
+     *
+     * @return a mutable map of non-null fields
+     */
     public Map<String, Object> toMap() {
         Map<String, Object> map = new java.util.HashMap<>();
         if (tenant != null) map.put("tenant", tenant);
@@ -84,6 +97,11 @@ public class Subject {
         return map;
     }
 
+    /**
+     * Returns {@code true} if at least one standard subject field is non-blank.
+     *
+     * @return whether any of tenant, workspace, app, workflow, agent, or toolset is set
+     */
     public boolean hasAtLeastOneStandardField() {
         return isNonBlank(tenant) || isNonBlank(workspace) || isNonBlank(app)
                 || isNonBlank(workflow) || isNonBlank(agent) || isNonBlank(toolset);

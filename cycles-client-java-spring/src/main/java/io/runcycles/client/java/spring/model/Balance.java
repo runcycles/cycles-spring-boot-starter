@@ -33,6 +33,12 @@ public class Balance {
         this.isOverLimit = isOverLimit;
     }
 
+    /**
+     * Deserializes a {@code Balance} from a raw API response map.
+     *
+     * @param map the balance section of the response, or {@code null}
+     * @return the parsed {@code Balance}, or {@code null} if the input is {@code null}
+     */
     @SuppressWarnings("unchecked")
     public static Balance fromMap(Map<String, Object> map) {
         if (map == null) return null;
@@ -50,7 +56,10 @@ public class Balance {
     }
 
     /**
-     * Parse a list of balance maps into typed Balance objects.
+     * Parses a list of raw balance maps into typed {@code Balance} objects.
+     *
+     * @param rawList the raw list from the API response, or {@code null}
+     * @return a list of parsed balances, or {@code null} if the input is {@code null}
      */
     @SuppressWarnings("unchecked")
     public static List<Balance> listFromRaw(List<?> rawList) {

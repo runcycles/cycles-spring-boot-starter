@@ -1,5 +1,11 @@
 package io.runcycles.client.java.spring.util;
 
+/**
+ * Shared constant values used across the Cycles client library.
+ *
+ * <p>Contains JSON field names for API request/response payloads, query parameter
+ * keys, and HTTP header names.
+ */
 public class Constants {
     public static final String IDEMPOTENCY_KEY = "idempotency_key";
     public static final String UNIT = "unit";

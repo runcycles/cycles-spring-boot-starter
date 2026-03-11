@@ -44,7 +44,9 @@ public class DryRunResult {
     public String getReasonCode() { return reasonCode; }
     public Integer getRetryAfterMs() { return retryAfterMs; }
 
+    /** Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}. */
     public boolean isAllowed() { return decision == Decision.ALLOW || decision == Decision.ALLOW_WITH_CAPS; }
+    /** Returns {@code true} if capability constraints were returned by the server. */
     public boolean hasCaps() { return caps != null; }
 
     @Override

@@ -7,6 +7,12 @@ package io.runcycles.client.java.spring.model;
 public enum CommitStatus {
     COMMITTED;
 
+    /**
+     * Parses a {@code CommitStatus} from its string representation.
+     *
+     * @param value the enum name, or {@code null}
+     * @return the matching status, or {@code null} if unrecognized or {@code null}
+     */
     public static CommitStatus fromString(String value) {
         if (value == null) return null;
         try {

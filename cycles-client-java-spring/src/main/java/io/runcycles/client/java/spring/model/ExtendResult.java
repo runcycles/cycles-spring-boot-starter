@@ -19,6 +19,12 @@ public class ExtendResult {
         this.balances = balances;
     }
 
+    /**
+     * Deserializes an {@code ExtendResult} from a raw API response map.
+     *
+     * @param map the response body map, or {@code null}
+     * @return the parsed result, or {@code null} if the input is {@code null}
+     */
     @SuppressWarnings("unchecked")
     public static ExtendResult fromMap(Map<String, Object> map) {
         if (map == null) return null;

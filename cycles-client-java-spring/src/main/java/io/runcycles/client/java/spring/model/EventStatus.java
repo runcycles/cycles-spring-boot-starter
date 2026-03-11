@@ -7,6 +7,12 @@ package io.runcycles.client.java.spring.model;
 public enum EventStatus {
     APPLIED;
 
+    /**
+     * Parses an {@code EventStatus} from its string representation.
+     *
+     * @param value the enum name, or {@code null}
+     * @return the matching status, or {@code null} if unrecognized or {@code null}
+     */
     public static EventStatus fromString(String value) {
         if (value == null) return null;
         try {

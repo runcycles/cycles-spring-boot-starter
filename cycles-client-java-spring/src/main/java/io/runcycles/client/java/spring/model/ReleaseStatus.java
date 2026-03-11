@@ -7,6 +7,12 @@ package io.runcycles.client.java.spring.model;
 public enum ReleaseStatus {
     RELEASED;
 
+    /**
+     * Parses a {@code ReleaseStatus} from its string representation.
+     *
+     * @param value the enum name, or {@code null}
+     * @return the matching status, or {@code null} if unrecognized or {@code null}
+     */
     public static ReleaseStatus fromString(String value) {
         if (value == null) return null;
         try {

@@ -10,6 +10,12 @@ public enum ReservationStatus {
     RELEASED,
     EXPIRED;
 
+    /**
+     * Parses a {@code ReservationStatus} from its string representation.
+     *
+     * @param value the enum name, or {@code null}
+     * @return the matching status, or {@code null} if unrecognized or {@code null}
+     */
     public static ReservationStatus fromString(String value) {
         if (value == null) return null;
         try {

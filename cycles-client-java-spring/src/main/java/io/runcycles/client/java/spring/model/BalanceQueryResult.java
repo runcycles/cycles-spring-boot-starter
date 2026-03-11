@@ -18,6 +18,12 @@ public class BalanceQueryResult {
         this.nextCursor = nextCursor;
     }
 
+    /**
+     * Deserializes a {@code BalanceQueryResult} from a raw API response map.
+     *
+     * @param map the response body map, or {@code null}
+     * @return the parsed result, or {@code null} if the input is {@code null}
+     */
     @SuppressWarnings("unchecked")
     public static BalanceQueryResult fromMap(Map<String, Object> map) {
         if (map == null) return null;
