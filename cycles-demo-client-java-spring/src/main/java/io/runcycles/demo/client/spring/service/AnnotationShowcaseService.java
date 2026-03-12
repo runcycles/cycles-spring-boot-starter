@@ -1,6 +1,9 @@
 package io.runcycles.demo.client.spring.service;
 
 import io.runcycles.client.java.spring.annotation.Cycles;
+import io.runcycles.client.java.spring.context.CyclesContextHolder;
+import io.runcycles.client.java.spring.context.CyclesReservationContext;
+import io.runcycles.client.java.spring.model.Caps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -13,6 +16,49 @@ import org.springframework.stereotype.Service;
 public class AnnotationShowcaseService {
 
     private static final Logger LOG = LoggerFactory.getLogger(AnnotationShowcaseService.class);
+
+    /**
+     * The simplest possible @Cycles usage — a fixed estimate with all defaults.
+     * This is the "hello world" of budget enforcement: reserve 1000 USD_MICROCENTS,
+     * run the method, commit the same amount.
+     */
+    @Cycles("1000")
+    public String minimal(String input) {
+        LOG.info("Minimal @Cycles example: input={}", input);
+        return "Processed: " + input;
+    }
+
+    /**
+     * Demonstrates reading and respecting Caps from an ALLOW_WITH_CAPS decision.
+     * When the server returns soft constraints (maxTokens, tool allow/deny lists),
+     * the method adjusts its behavior accordingly.
+     */
+    @Cycles(value = "#maxTokens * 10",
+            actionKind = "llm.completion",
+            actionName = "gpt-4o")
+    public String capsAwareGeneration(int maxTokens) {
+        LOG.info("Caps-aware generation: requested maxTokens={}", maxTokens);
+        int effectiveTokens = maxTokens;
+
+        CyclesReservationContext ctx = CyclesContextHolder.get();
+        if (ctx != null && ctx.hasCaps()) {
+            Caps caps = ctx.getCaps();
+            LOG.info("Server returned caps: {}", caps);
+
+            // Respect the token cap if the server imposed one
+            if (caps.getMaxTokens() != null && caps.getMaxTokens() < effectiveTokens) {
+                LOG.info("Reducing tokens from {} to {} per server caps", effectiveTokens, caps.getMaxTokens());
+                effectiveTokens = caps.getMaxTokens();
+            }
+
+            // Check tool restrictions
+            if (!caps.isToolAllowed("web_search")) {
+                LOG.info("web_search tool is not allowed under current caps — skipping");
+            }
+        }
+
+        return "Generated " + effectiveTokens + " tokens (requested: " + maxTokens + ")";
+    }
 
     /**
      * Demonstrates: unit = TOKENS, actionTags for filtering.

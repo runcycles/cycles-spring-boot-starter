@@ -5,19 +5,33 @@ spring:
   application:
     name: cycles-demo-app
 
+# ============================================================================
 # Cycles Spring Boot Starter configuration
-# See: cycles-client-java-spring CyclesProperties for all available options
+#
+# Before running the demo, you need a Cycles stack with a tenant, API key,
+# and budget. Follow the deployment guide:
+#   https://docs.runcycles.io/quickstart/deploying-the-full-cycles-stack
+#
+# Quick setup (after the stack is running):
+#   1. Create tenant "acme-corp" via the admin API
+#   2. Create an API key for that tenant
+#   3. Create a budget: scope "tenant:acme-corp", unit USD_MICROCENTS
+#   4. Paste the API key below
+# ============================================================================
 cycles:
-  # Required: API key for authenticating with the Cycles server
-  api-key: gov_es8SkfWnwpbu8n3rc62nP_J7fiJnKWsP
+  # Required: paste your API key here (from Step 3 of the deployment guide)
+  api-key: ${CYCLES_API_KEY:your-api-key-here}
 
-  # Required: Base URL of the Cycles budget authority server
+  # Required: Base URL of the Cycles server
   base-url: http://localhost:7878
 
-  # Default subject fields — applied to all @Cycles annotations unless overridden.
-  # The tenant field is resolved dynamically via CyclesTenantResolver in this demo.
+  # Default subject fields — these match the deployment guide's tenant name.
+  # The tenant can also be resolved dynamically; see CyclesTenantResolver.java
+  # for an example. When cycles.tenant is set here, the resolver is not called
+  # (config takes priority over resolver beans).
+  tenant: acme-corp
   workspace: development
-  app: scalerx
+  app: demo
 
   # Retry configuration for failed commit requests (exponential backoff)
   retry:
