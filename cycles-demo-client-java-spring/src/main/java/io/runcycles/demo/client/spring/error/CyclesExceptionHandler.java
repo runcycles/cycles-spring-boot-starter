@@ -64,11 +64,17 @@ public class CyclesExceptionHandler {
         }
         body.put("errorCategory", category);
 
-        // Map to appropriate HTTP status
+        // Map Cycles server HTTP status to the outgoing response status.
+        // Protocol error codes and their HTTP statuses:
+        //   409 = BUDGET_EXCEEDED, OVERDRAFT_LIMIT_EXCEEDED, DEBT_OUTSTANDING,
+        //         RESERVATION_FINALIZED, IDEMPOTENCY_MISMATCH
+        //   410 = RESERVATION_EXPIRED
+        //   400 = INVALID_REQUEST, UNIT_MISMATCH
+        //   401 = UNAUTHORIZED, 403 = FORBIDDEN, 404 = NOT_FOUND, 500 = INTERNAL_ERROR
         HttpStatus status = switch (ex.getHttpStatus()) {
-            case 409 -> HttpStatus.CONFLICT;            // Budget exceeded, reservation conflicts
-            case 402 -> HttpStatus.PAYMENT_REQUIRED;    // Debt outstanding
-            case 400 -> HttpStatus.BAD_REQUEST;         // Validation errors
+            case 409 -> HttpStatus.CONFLICT;            // Budget exceeded, debt, overdraft, conflicts
+            case 410 -> HttpStatus.GONE;                // Reservation expired
+            case 400 -> HttpStatus.BAD_REQUEST;         // Validation errors, unit mismatch
             case 404 -> HttpStatus.NOT_FOUND;           // Reservation not found
             case 401 -> HttpStatus.UNAUTHORIZED;
             case 403 -> HttpStatus.FORBIDDEN;
