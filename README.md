@@ -469,9 +469,22 @@ cycles-spring-boot-starter/
 
 ## Demo Application
 
-The demo app at `cycles-demo-client-java-spring/` showcases every major feature of the starter. Run it with `mvn spring-boot:run` (requires a Cycles server at `http://localhost:7878`).
+The demo app at `cycles-demo-client-java-spring/` showcases every major feature of the starter.
 
-Hit `GET http://localhost:7955/api/demo/index` for a full listing of all endpoints with descriptions.
+**Prerequisites:** You need a running Cycles stack with a tenant, API key, and budget. Follow the [deployment guide](https://docs.runcycles.io/quickstart/deploying-the-full-cycles-stack) to set up the `acme-corp` tenant used by the demo. Then:
+
+```bash
+cd cycles-demo-client-java-spring
+export CYCLES_API_KEY=cyc_live_...   # paste the key from the deployment guide
+mvn spring-boot:run
+```
+
+Start with the simplest endpoint:
+```bash
+curl -X POST http://localhost:7955/api/demo/annotation/minimal?input=hello
+```
+
+Hit `GET http://localhost:7955/api/demo/index` for a full listing of all endpoints with copy-paste curl commands.
 
 Key demo scenarios:
 - **`/api/llm/*`** — `@Cycles` annotation with `CyclesContextHolder`, `CyclesMetrics`, and `commitMetadata`
