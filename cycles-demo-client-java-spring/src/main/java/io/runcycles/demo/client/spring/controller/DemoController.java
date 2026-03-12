@@ -32,6 +32,31 @@ public class DemoController {
 
     // ---- Annotation Showcase Endpoints ----
 
+    @PostMapping("/annotation/minimal")
+    public ResponseEntity<Map<String, Object>> annotationMinimal(
+            @RequestParam(defaultValue = "hello world") String input) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("scenario", "Simplest possible @Cycles — fixed estimate, all defaults");
+        response.put("annotationConfig", Map.of("value", "1000"));
+        response.put("result", annotationShowcaseService.minimal(input));
+        response.put("note", "Reserves 1000 USD_MICROCENTS, runs the method, commits the same amount");
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/annotation/caps")
+    public ResponseEntity<Map<String, Object>> annotationCaps(
+            @RequestParam(defaultValue = "500") int maxTokens) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("scenario", "@Cycles with ALLOW_WITH_CAPS — reading and respecting server-imposed constraints");
+        response.put("annotationConfig", Map.of(
+                "value", "#maxTokens * 10",
+                "actionKind", "llm.completion",
+                "actionName", "gpt-4o"));
+        response.put("result", annotationShowcaseService.capsAwareGeneration(maxTokens));
+        response.put("note", "If the server returns caps (maxTokens, tool restrictions), the method adjusts its behavior");
+        return ResponseEntity.ok(response);
+    }
+
     @PostMapping("/annotation/tokens")
     public ResponseEntity<Map<String, Object>> annotationTokens(
             @RequestParam(defaultValue = "500") int tokenCount) {
@@ -168,51 +193,74 @@ public class DemoController {
 
     @GetMapping("/index")
     public ResponseEntity<Map<String, Object>> index() {
+        String base = "http://localhost:7955";
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("application", "Cycles Spring Boot Starter Demo");
-        response.put("description", "Each endpoint demonstrates a specific Cycles feature");
+        response.put("description", "Each endpoint demonstrates a specific Cycles feature. " +
+                "Copy any curl command below to try it.");
 
         List<Map<String, String>> endpoints = new ArrayList<>();
 
+        // Start here
+        endpoints.add(endpointInfo("POST", "/api/demo/annotation/minimal?input=hello",
+                "Start here — simplest @Cycles(\"1000\") with all defaults",
+                "curl -X POST " + base + "/api/demo/annotation/minimal?input=hello"));
+
+        // Annotation features
+        endpoints.add(endpointInfo("POST", "/api/demo/annotation/caps?maxTokens=500",
+                "@Cycles with ALLOW_WITH_CAPS — reading and respecting server constraints",
+                "curl -X POST " + base + "/api/demo/annotation/caps?maxTokens=500"));
         endpoints.add(endpointInfo("POST", "/api/llm/generate?prompt=hello&tokens=100",
-                "@Cycles annotation with CyclesContextHolder, metrics, and commitMetadata"));
-        endpoints.add(endpointInfo("POST", "/api/llm/chat",
-                "@Cycles annotation via JSON body {\"prompt\": \"...\", \"tokens\": 100}"));
-
+                "@Cycles with CyclesContextHolder, metrics, and commitMetadata",
+                "curl -X POST '" + base + "/api/llm/generate?prompt=hello&tokens=100'"));
         endpoints.add(endpointInfo("POST", "/api/demo/annotation/tokens?tokenCount=500",
-                "@Cycles with unit=TOKENS and actionTags"));
+                "@Cycles with unit=TOKENS and actionTags",
+                "curl -X POST " + base + "/api/demo/annotation/tokens?tokenCount=500"));
         endpoints.add(endpointInfo("POST", "/api/demo/annotation/credits?creditAmount=100",
-                "@Cycles with unit=CREDITS, workflow/agent, dimensions"));
+                "@Cycles with unit=CREDITS, workflow/agent, dimensions",
+                "curl -X POST " + base + "/api/demo/annotation/credits?creditAmount=100"));
         endpoints.add(endpointInfo("POST", "/api/demo/annotation/overdraft?amount=1000",
-                "@Cycles with overagePolicy=ALLOW_WITH_OVERDRAFT"));
+                "@Cycles with overagePolicy=ALLOW_WITH_OVERDRAFT",
+                "curl -X POST " + base + "/api/demo/annotation/overdraft?amount=1000"));
         endpoints.add(endpointInfo("POST", "/api/demo/annotation/custom-ttl?amount=200",
-                "@Cycles with custom ttlMs and gracePeriodMs"));
+                "@Cycles with custom ttlMs and gracePeriodMs",
+                "curl -X POST " + base + "/api/demo/annotation/custom-ttl?amount=200"));
         endpoints.add(endpointInfo("POST", "/api/demo/annotation/dry-run?amount=500",
-                "@Cycles with dryRun=true (shadow-mode)"));
+                "@Cycles with dryRun=true (shadow-mode)",
+                "curl -X POST " + base + "/api/demo/annotation/dry-run?amount=500"));
 
+        // Programmatic client
         endpoints.add(endpointInfo("POST", "/api/demo/client/reserve-commit?estimate=5000",
-                "Programmatic: full reserve → commit lifecycle"));
+                "Programmatic: full reserve → commit lifecycle",
+                "curl -X POST " + base + "/api/demo/client/reserve-commit?estimate=5000"));
         endpoints.add(endpointInfo("POST", "/api/demo/client/reserve-release?estimate=3000",
-                "Programmatic: reserve → release (cancellation)"));
+                "Programmatic: reserve → release (cancellation)",
+                "curl -X POST " + base + "/api/demo/client/reserve-release?estimate=3000"));
         endpoints.add(endpointInfo("POST", "/api/demo/client/decide?estimate=10000",
-                "Programmatic: preflight decision check"));
+                "Programmatic: preflight decision check",
+                "curl -X POST " + base + "/api/demo/client/decide?estimate=10000"));
         endpoints.add(endpointInfo("GET", "/api/demo/client/balances",
-                "Programmatic: query current balances"));
+                "Programmatic: query current balances",
+                "curl " + base + "/api/demo/client/balances"));
         endpoints.add(endpointInfo("GET", "/api/demo/client/reservations",
-                "Programmatic: list reservations"));
+                "Programmatic: list reservations",
+                "curl " + base + "/api/demo/client/reservations"));
 
+        // Events
         endpoints.add(endpointInfo("POST", "/api/demo/events/record?amount=1500&description=API+call",
-                "Standalone event (direct debit, no reservation)"));
+                "Standalone event (direct debit, no reservation)",
+                "curl -X POST '" + base + "/api/demo/events/record?amount=1500&description=API+call'"));
 
         response.put("endpoints", endpoints);
         return ResponseEntity.ok(response);
     }
 
-    private Map<String, String> endpointInfo(String method, String path, String description) {
+    private Map<String, String> endpointInfo(String method, String path, String description, String curl) {
         Map<String, String> info = new LinkedHashMap<>();
         info.put("method", method);
         info.put("path", path);
         info.put("description", description);
+        info.put("curl", curl);
         return info;
     }
 }

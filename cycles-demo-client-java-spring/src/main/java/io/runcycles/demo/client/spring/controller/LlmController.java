@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -34,7 +33,7 @@ public class LlmController {
             String prompt = (String) request.get("prompt");
             int tokens = ((Number) request.get("tokens")).intValue();
             String result = llmService.generateText(prompt, tokens);
-            Map<String, Object> responseBody = new HashMap<>();
+            Map<String, Object> responseBody = new LinkedHashMap<>();
             responseBody.put("prompt", prompt);
             responseBody.put("response", result);
             long t2 = System.currentTimeMillis() ;
@@ -51,7 +50,7 @@ public class LlmController {
             return ResponseEntity.status(e.getHttpStatus() > 0 ? e.getHttpStatus() : 500).body(result);
         } catch (Exception e) {
             LOG.error("Failed to chat: request={}", request, e);
-            Map<String, Object> result = new HashMap<>();
+            Map<String, Object> result = new LinkedHashMap<>();
             result.put("error", e.getMessage());
             return ResponseEntity.internalServerError().body(result);
         }
