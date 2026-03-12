@@ -1,13 +1,25 @@
 server:
   port: 7955
+
 spring:
   application:
     name: cycles-demo-app
+
+# Cycles Spring Boot Starter configuration
+# See: cycles-client-java-spring CyclesProperties for all available options
 cycles:
+  # Required: API key for authenticating with the Cycles server
   api-key: gov_es8SkfWnwpbu8n3rc62nP_J7fiJnKWsP
+
+  # Required: Base URL of the Cycles budget authority server
   base-url: http://localhost:7878
+
+  # Default subject fields — applied to all @Cycles annotations unless overridden.
+  # The tenant field is resolved dynamically via CyclesTenantResolver in this demo.
   workspace: development
   app: scalerx
+
+  # Retry configuration for failed commit requests (exponential backoff)
   retry:
     enabled: true
     max-attempts: 5
