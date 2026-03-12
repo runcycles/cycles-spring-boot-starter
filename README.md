@@ -22,7 +22,7 @@ Requires Java 21+ and Spring Boot 3.3+.
 
 ### 2. Configure the connection
 
-Add the following to your project's `src/main/resources/application.yml`:
+Add the following to your project's `application.yml`:
 
 ```yaml
 cycles:
@@ -104,7 +104,7 @@ When `ALLOW_WITH_CAPS` is returned, the `Caps` object is available via `CyclesCo
 
 ## Configuration Reference
 
-All properties are configured in your project's `src/main/resources/application.yml` (or `application.properties`).
+All properties are configured in your project's `application.yml` (or `application.properties`).
 
 ### Connection Properties
 
