@@ -22,6 +22,8 @@ Requires Java 21+ and Spring Boot 3.3+.
 
 ### 2. Configure the connection
 
+Add the following to your project's `src/main/resources/application.yml`:
+
 ```yaml
 cycles:
   api-key: your-api-key
@@ -101,6 +103,8 @@ Per the spec, budget denials for non-dry-run reservations are expressed as HTTP 
 When `ALLOW_WITH_CAPS` is returned, the `Caps` object is available via `CyclesContextHolder` inside your method (see [Accessing Caps](#accessing-caps-in-your-method)).
 
 ## Configuration Reference
+
+All properties are configured in your project's `src/main/resources/application.yml` (or `application.properties`).
 
 ### Connection Properties
 
@@ -446,7 +450,34 @@ cycles-spring-boot-starter/
 │       ├── retry/                     # CommitRetryEngine
 │       └── util/                      # Constants, validation
 └── cycles-demo-client-java-spring/    # Demo application
+    └── src/main/java/io/runcycles/demo/client/spring/
+        ├── controller/
+        │   ├── LlmController.java           # LLM endpoints with error handling
+        │   └── DemoController.java          # Central demo REST API (/api/demo/*)
+        ├── service/
+        │   ├── LlmService.java              # @Cycles with context, metrics, metadata
+        │   ├── AnnotationShowcaseService.java # Annotation variations (units, TTL, etc.)
+        │   ├── ProgrammaticClientService.java # Direct CyclesClient usage
+        │   └── EventService.java            # Standalone events (direct debit)
+        ├── resolvers/
+        │   └── CyclesTenantResolver.java    # Dynamic tenant via CyclesFieldResolver
+        ├── error/
+        │   └── CyclesExceptionHandler.java  # Global error handler
+        └── resources/
+            └── application.yml              # Demo configuration
 ```
+
+## Demo Application
+
+The demo app at `cycles-demo-client-java-spring/` showcases every major feature of the starter. Run it with `mvn spring-boot:run` (requires a Cycles server at `http://localhost:7878`).
+
+Hit `GET http://localhost:7955/api/demo/index` for a full listing of all endpoints with descriptions.
+
+Key demo scenarios:
+- **`/api/llm/*`** — `@Cycles` annotation with `CyclesContextHolder`, `CyclesMetrics`, and `commitMetadata`
+- **`/api/demo/annotation/*`** — Annotation variations: `unit=TOKENS`, `unit=CREDITS`, `overagePolicy`, `ttlMs`/`gracePeriodMs`, `dryRun`, `dimensions`, `workflow`/`agent`
+- **`/api/demo/client/*`** — Programmatic `CyclesClient` usage: reserve/commit, reserve/release, preflight `decide()`, `getBalances()`, `listReservations()`
+- **`/api/demo/events/*`** — Standalone events via `createEvent()` (direct debit without reservation)
 
 ## Protocol Spec Coverage
 
