@@ -535,6 +535,35 @@ class CyclesLifecycleServiceTest {
         }
 
         @Test
+        void shouldNotReleaseOnIdempotencyMismatch() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-idem")));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(eq("res-idem"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(409, "Idempotency mismatch",
+                            Map.of("error", "IDEMPOTENCY_MISMATCH", "message", "Idempotency mismatch", "request_id", "r1")));
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            // Should NOT release or retry — reservation state is uncertain
+            verify(client, never()).releaseReservation(anyString(), any(Object.class));
+            verify(retryEngine, never()).schedule(anyString(), any());
+        }
+
+        @Test
         void shouldReleaseOnNonRetryable4xx() throws Throwable {
             Cycles cycles = mockCycles(false);
             Method method = dummyMethod();
