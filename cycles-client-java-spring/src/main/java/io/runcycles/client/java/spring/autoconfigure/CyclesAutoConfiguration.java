@@ -162,6 +162,7 @@ public class CyclesAutoConfiguration {
      * @return the Cycles aspect
      */
     @Bean
+    @ConditionalOnMissingBean
     public CyclesAspect aspect(CyclesLifecycleService lifecycleService) {
         return new CyclesAspect(lifecycleService);
     }

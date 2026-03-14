@@ -180,6 +180,26 @@ class CyclesAutoConfigurationTest {
         }
 
         @Test
+        void shouldAllowCustomCyclesAspectOverride() {
+            contextRunner
+                    .withPropertyValues(
+                            "cycles.base-url=http://localhost:7878",
+                            "cycles.api-key=test-key"
+                    )
+                    .withBean(CyclesAspect.class, () -> new CyclesAspect(
+                            new CyclesLifecycleService(
+                                    new DefaultCyclesClient(org.springframework.web.reactive.function.client.WebClient.create()),
+                                    (id, body) -> {},
+                                    new CyclesRequestBuilderService(new CyclesValueResolutionService(java.util.Map.of(), new io.runcycles.client.java.spring.config.CyclesProperties())),
+                                    new CyclesExpressionEvaluator()
+                            )
+                    ))
+                    .run(context -> {
+                        assertThat(context).hasSingleBean(CyclesAspect.class);
+                    });
+        }
+
+        @Test
         void shouldAllowCustomLifecycleServiceOverride() {
             contextRunner
                     .withPropertyValues(

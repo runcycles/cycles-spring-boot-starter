@@ -18,7 +18,7 @@ Cycles enforces budget reservations around guarded method executions using a **r
 </dependency>
 ```
 
-Requires Java 21+ and Spring Boot 3.3+.
+Requires Java 21+ and Spring Boot 3.3+. Designed for blocking Spring MVC workloads — not compatible with reactive WebFlux pipelines (see [Threading Model](#threading-model)).
 
 ### 2. Configure the connection
 
@@ -512,6 +512,12 @@ This starter implements the [Cycles Protocol v0](https://github.com/runcycles/cy
 | `metadata` on requests | Implemented | User sets commit metadata via `CyclesContextHolder` |
 | `X-Idempotency-Key` header | Implemented | Sent automatically on all POST requests |
 | `Subject.dimensions` | Implemented | Via `@Cycles(dimensions = {"key=value"})` |
+
+## Threading Model
+
+`CyclesContextHolder` uses `ThreadLocal` to propagate reservation context to the guarded method. This works correctly with blocking Spring MVC but **does not work with reactive WebFlux pipelines**. Context will not propagate across reactive operator boundaries (e.g. `Mono.flatMap`, `Flux.map`), and calling `CyclesContextHolder.get()` from a scheduler thread will return `null`.
+
+If you are using WebFlux, do not rely on `CyclesContextHolder` inside reactive chains. This is a known design constraint for v0 — the library targets Spring MVC and blocking Spring AI workloads.
 
 ## License
 

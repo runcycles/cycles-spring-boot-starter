@@ -245,6 +245,8 @@ public class CyclesLifecycleService {
                         || commitErrorCode == ErrorCode.RESERVATION_EXPIRED) {
                     LOG.warn("Reservation already finalized/expired, skipping release: reservationId={}, errorCode={}",
                             reservationId, commitErrorCode);
+                } else if (commitErrorCode == ErrorCode.IDEMPOTENCY_MISMATCH) {
+                    LOG.warn("Commit idempotency mismatch (not releasing): reservationId={}", reservationId);
                 } else if (commitResponse.is4xx()) {
                     handleRelease(reservationId, "commit_rejected_" + commitErrorCode);
                 } else {

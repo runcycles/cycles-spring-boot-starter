@@ -8,6 +8,13 @@ package io.runcycles.client.java.spring.context;
  * {@code @Cycles}-annotated method can call {@link #get()} to inspect reservation
  * details, attach metrics, or add commit metadata.
  *
+ * <p><strong>Threading model:</strong> This holder uses {@link ThreadLocal} and is
+ * designed for blocking Spring MVC workloads. It is <em>not</em> compatible with
+ * reactive (WebFlux) pipelines — context will not propagate across reactive operator
+ * boundaries (e.g. {@code Mono.flatMap}). Calling {@link #get()} from a different
+ * thread than the one that executed the {@code @Cycles}-annotated method will return
+ * {@code null}.
+ *
  * @see CyclesReservationContext
  */
 public final class CyclesContextHolder {
