@@ -23,6 +23,6 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Run tests
+      - name: Run tests and verify coverage
         working-directory: cycles-client-java-spring
-        run: mvn -B test
+        run: mvn -B verify
