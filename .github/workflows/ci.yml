@@ -26,3 +26,11 @@ jobs:
       - name: Run tests and verify coverage
         working-directory: cycles-client-java-spring
         run: mvn -B verify
+
+      - name: Install starter to local repo
+        working-directory: cycles-client-java-spring
+        run: mvn -B install -DskipTests
+
+      - name: Compile demo module
+        working-directory: cycles-demo-client-java-spring
+        run: mvn -B compile
