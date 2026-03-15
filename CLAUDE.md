@@ -7,10 +7,11 @@ The session start hook (`.claude/session-start-maven-proxy.sh`) automatically se
 
 ```bash
 # Use this:
-mvn-proxy -B verify --file cycles-spring-boot-starter/pom.xml
+mvn-proxy -B verify --file cycles-client-java-spring/pom.xml
+mvn-proxy -B verify --file cycles-demo-client-java-spring/pom.xml
 
 # NOT this (will fail with DNS/proxy errors):
-mvn -B verify --file cycles-spring-boot-starter/pom.xml
+mvn -B verify --file cycles-client-java-spring/pom.xml
 ```
 
 **Why:** The remote environment routes traffic through an egress proxy. Java's `JAVA_TOOL_OPTIONS`
