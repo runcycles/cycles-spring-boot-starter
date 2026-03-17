@@ -33,6 +33,15 @@ cycles:
   app: my-app
 ```
 
+> **Need an API key?** API keys are created via the Cycles Admin Server (port 7979). See the [deployment guide](https://docs.runcycles.io/quickstart/deploying-the-full-cycles-stack#step-3-create-an-api-key) to create one, or run:
+> ```bash
+> curl -s -X POST http://localhost:7979/v1/admin/api-keys \
+>   -H "Content-Type: application/json" \
+>   -H "X-Admin-API-Key: admin-bootstrap-key" \
+>   -d '{"tenant_id":"acme-corp","name":"dev-key","permissions":["reservations:create","reservations:commit","reservations:release","reservations:extend","reservations:list","balances:read","decide","events:create"]}' | jq -r '.key_secret'
+> ```
+> The key (e.g. `cyc_live_abc123...`) is shown only once — save it immediately. For key rotation and lifecycle details, see [API Key Management](https://docs.runcycles.io/how-to/api-key-management-in-cycles).
+
 ### 3. Annotate your method
 
 ```java
