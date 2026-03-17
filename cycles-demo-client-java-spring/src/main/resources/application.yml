@@ -10,7 +10,7 @@ spring:
 #
 # Before running the demo, you need a Cycles stack with a tenant, API key,
 # and budget. Follow the deployment guide:
-#   https://docs.runcycles.io/quickstart/deploying-the-full-cycles-stack
+#   https://runcycles.io/quickstart/deploying-the-full-cycles-stack
 #
 # Quick setup (after the stack is running):
 #   1. Create tenant "acme-corp" via the admin API
