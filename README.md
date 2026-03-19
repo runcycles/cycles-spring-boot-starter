@@ -1,6 +1,7 @@
-# Cycles Spring Boot Starter
+[![CI](https://github.com/runcycles/cycles-spring-boot-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/runcycles/cycles-spring-boot-starter/actions)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+# Cycles Spring Boot Starter
 
 A Spring Boot starter that integrates with the [Cycles Budget Authority](https://github.com/runcycles/cycles-protocol) — a deterministic spend governance protocol for agent runtimes.
 
