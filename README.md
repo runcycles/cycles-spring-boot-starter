@@ -120,16 +120,14 @@ All properties are configured in your project's `application.yml` (or `applicati
 
 ```yaml
 cycles:
-  api-key: ""              # X-Cycles-API-Key header (required)
-  base-url: ""             # Cycles server URL (required)
+  api-key: ${CYCLES_API_KEY}          # X-Cycles-API-Key header (required)
+  base-url: http://localhost:7878     # Cycles server URL (required)
 
-  # Default subject fields (can be overridden per-annotation)
-  tenant: ""
-  workspace: ""
-  app: ""
-  workflow: ""
-  agent: ""
-  toolset: ""
+  # Default subject fields (applied to all @Cycles methods unless overridden per-annotation)
+  tenant: acme-corp
+  workspace: development
+  app: my-app
+  # workflow, agent, toolset — omit if not needed globally
 
   # HTTP client settings
   http:
@@ -167,6 +165,31 @@ cycles:
 | `workflow` | No | `""` | Override workflow |
 | `agent` | No | `""` | Override agent |
 | `toolset` | No | `""` | Override toolset |
+
+### Per-Annotation Subject Overrides
+
+Any subject field set on `@Cycles` overrides the config default for that method call. This changes which budget scope the reservation targets.
+
+```java
+// Given config: tenant=acme-corp, workspace=development, app=my-app
+
+// Uses ALL config defaults.
+// Budget scope: tenant:acme-corp/workspace:development/app:my-app
+@Cycles("1000")
+public String defaultScope(String input) { ... }
+
+// Overrides workspace → targets the STAGING budget, not development.
+// Budget scope: tenant:acme-corp/workspace:staging/app:my-app
+@Cycles(value = "1000", workspace = "staging")
+public String stagingScope(String input) { ... }
+
+// Overrides workspace AND app → targets production billing budget.
+// Budget scope: tenant:acme-corp/workspace:production/app:billing-service
+@Cycles(value = "#amount", workspace = "production", app = "billing-service")
+public String productionBilling(int amount) { ... }
+```
+
+> **Budget scopes are independent.** `tenant:acme-corp/workspace:development` and `tenant:acme-corp/workspace:staging` have separate budgets. A reservation must pass budget checks at **all** affected scope levels in the hierarchy (e.g., both `tenant:acme-corp` and `tenant:acme-corp/workspace:staging`).
 
 ### SpEL Expressions
 
@@ -498,7 +521,7 @@ Hit `GET http://localhost:7955/api/demo/index` for a full listing of all endpoin
 
 Key demo scenarios:
 - **`/api/llm/*`** — `@Cycles` annotation with `CyclesContextHolder`, `CyclesMetrics`, and `commitMetadata`
-- **`/api/demo/annotation/*`** — Annotation variations: `unit=TOKENS`, `unit=CREDITS`, `overagePolicy`, `ttlMs`/`gracePeriodMs`, `dryRun`, `dimensions`, `workflow`/`agent`
+- **`/api/demo/annotation/*`** — Annotation variations: per-annotation budget targeting (`workspace`/`app` override), `unit=TOKENS`, `unit=CREDITS`, `overagePolicy`, `ttlMs`/`gracePeriodMs`, `dryRun`, `dimensions`, `workflow`/`agent`
 - **`/api/demo/client/*`** — Programmatic `CyclesClient` usage: reserve/commit, reserve/release, preflight `decide()`, `getBalances()`, `listReservations()`
 - **`/api/demo/events/*`** — Standalone events via `createEvent()` (direct debit without reservation)
 

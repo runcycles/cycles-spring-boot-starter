@@ -86,6 +86,25 @@ public class DemoController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/annotation/budget-targeting")
+    public ResponseEntity<Map<String, Object>> annotationBudgetTargeting(
+            @RequestParam(defaultValue = "500") int amount) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("scenario", "@Cycles with per-annotation workspace/app override — targets staging budget scope instead of development");
+        response.put("annotationConfig", Map.of(
+                "estimate", "#amount",
+                "workspace", "staging",
+                "app", "qa-runner",
+                "actionKind", "test.execution",
+                "actionName", "integration-test"));
+        response.put("configDefaults", Map.of("tenant", "acme-corp", "workspace", "development", "app", "demo"));
+        response.put("resolvedScope", "tenant:acme-corp/workspace:staging/app:qa-runner");
+        response.put("result", annotationShowcaseService.processForStagingBudget(amount));
+        response.put("note", "Config sets workspace=development, but this annotation overrides to workspace=staging. " +
+                "Budget is checked against the staging scope, not development.");
+        return ResponseEntity.ok(response);
+    }
+
     @PostMapping("/annotation/overdraft")
     public ResponseEntity<Map<String, Object>> annotationOverdraft(
             @RequestParam(defaultValue = "1000") int amount) {
@@ -219,6 +238,9 @@ public class DemoController {
         endpoints.add(endpointInfo("POST", "/api/demo/annotation/credits?creditAmount=100",
                 "@Cycles with unit=CREDITS, workflow/agent, dimensions",
                 "curl -X POST " + base + "/api/demo/annotation/credits?creditAmount=100"));
+        endpoints.add(endpointInfo("POST", "/api/demo/annotation/budget-targeting?amount=500",
+                "@Cycles with workspace/app override — targets staging budget instead of development",
+                "curl -X POST " + base + "/api/demo/annotation/budget-targeting?amount=500"));
         endpoints.add(endpointInfo("POST", "/api/demo/annotation/overdraft?amount=1000",
                 "@Cycles with overagePolicy=ALLOW_WITH_OVERDRAFT",
                 "curl -X POST " + base + "/api/demo/annotation/overdraft?amount=1000"));

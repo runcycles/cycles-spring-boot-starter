@@ -91,6 +91,29 @@ public class AnnotationShowcaseService {
     }
 
     /**
+     * Demonstrates: per-annotation subject field override for budget scope targeting.
+     *
+     * Config sets workspace = "development" and app = "demo", but this method overrides
+     * them to workspace = "staging" and app = "qa-runner". This changes which budget scope
+     * the reservation is checked against:
+     *
+     *   Config defaults  → tenant:acme-corp/workspace:development/app:demo
+     *   This method      → tenant:acme-corp/workspace:staging/app:qa-runner
+     *
+     * Each scope has an independent budget. Overriding subject fields lets different methods
+     * consume from different budgets without changing the global configuration.
+     */
+    @Cycles(estimate = "#amount",
+            workspace = "staging",
+            app = "qa-runner",
+            actionKind = "test.execution",
+            actionName = "integration-test")
+    public String processForStagingBudget(int amount) {
+        LOG.info("Processing against STAGING budget scope: amount={}", amount);
+        return "Executed against staging budget (workspace=staging, app=qa-runner) with amount " + amount;
+    }
+
+    /**
      * Demonstrates: overagePolicy = ALLOW_WITH_OVERDRAFT, separate actual expression.
      * When the budget is insufficient, the server allows the operation and records overdraft debt
      * instead of rejecting. The actual cost is computed from the result length.
