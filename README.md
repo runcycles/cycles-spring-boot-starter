@@ -552,6 +552,12 @@ This starter implements the [Cycles Protocol v0](https://github.com/runcycles/cy
 
 If you are using WebFlux, do not rely on `CyclesContextHolder` inside reactive chains. This is a known design constraint for v0 — the library targets Spring MVC and blocking Spring AI workloads.
 
+## Documentation
+
+- [Cycles Documentation](https://runcycles.io) — full docs site
+- [Spring Boot Quickstart](https://runcycles.io/quickstart/getting-started-with-the-cycles-spring-boot-starter) — getting started guide
+- [Spring Client Configuration Reference](https://runcycles.io/configuration/client-configuration-reference-for-cycles-spring-boot-starter) — all configuration options
+
 ## License
 
 Apache 2.0
