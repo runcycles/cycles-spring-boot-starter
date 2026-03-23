@@ -617,6 +617,56 @@ public class MyService {
 
 > **Startup warning:** The starter logs a `WARN` at startup when it detects a bean where some methods have `@Cycles` and others do not, since this pattern is susceptible to self-invocation issues. The warning is informational — it does not block startup.
 
+## Nested @Cycles (Cross-Service Calls)
+
+Calling a `@Cycles`-annotated method from inside another `@Cycles`-annotated method — even across different beans — throws an `IllegalStateException`. This is intentional:
+
+- **Double-counting:** The outer reservation already reserves budget for the full operation. An inner reservation would deduct *additional* budget from the same pool, over-reserving.
+- **Protocol design:** The Cycles Protocol v0 has no concept of parent/child reservations. Each reservation is independent and atomic.
+
+```java
+// BROKEN — throws IllegalStateException("Nested @Cycles not supported")
+@Service
+public class Orchestrator {
+
+    @Autowired private LlmService llmService;
+
+    @Cycles("#tokens * 10")
+    public String orchestrate(int tokens) {
+        return llmService.generate("hello", tokens);  // throws!
+    }
+}
+
+@Service
+public class LlmService {
+
+    @Cycles("#tokens * 5")  // ← second @Cycles while outer is active
+    public String generate(String prompt, int tokens) { ... }
+}
+```
+
+**Correct pattern:** Place `@Cycles` at the outermost entry point only. Inner services should be plain methods:
+
+```java
+@Service
+public class Orchestrator {
+
+    @Autowired private LlmService llmService;
+
+    @Cycles("#tokens * 10")
+    public String orchestrate(int tokens) {
+        return llmService.generate("hello", tokens);  // works — no @Cycles on inner method
+    }
+}
+
+@Service
+public class LlmService {
+
+    // No @Cycles here — called from within an already-guarded operation
+    public String generate(String prompt, int tokens) { ... }
+}
+```
+
 ## Threading Model
 
 `CyclesContextHolder` uses `ThreadLocal` to propagate reservation context to the guarded method. This works correctly with blocking Spring MVC but **does not work with reactive WebFlux pipelines**. Context will not propagate across reactive operator boundaries (e.g. `Mono.flatMap`, `Flux.map`), and calling `CyclesContextHolder.get()` from a scheduler thread will return `null`.
