@@ -166,4 +166,16 @@ public class CyclesAutoConfiguration {
     public CyclesAspect aspect(CyclesLifecycleService lifecycleService) {
         return new CyclesAspect(lifecycleService);
     }
+
+    /**
+     * Registers a bean post-processor that warns about beans susceptible to
+     * the Spring AOP self-invocation pitfall with {@code @Cycles}.
+     *
+     * @return the self-invocation detector
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public CyclesSelfInvocationDetector cyclesSelfInvocationDetector() {
+        return new CyclesSelfInvocationDetector();
+    }
 }

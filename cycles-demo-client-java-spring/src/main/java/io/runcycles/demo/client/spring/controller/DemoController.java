@@ -3,6 +3,7 @@ package io.runcycles.demo.client.spring.controller;
 import io.runcycles.demo.client.spring.service.AnnotationShowcaseService;
 import io.runcycles.demo.client.spring.service.EventService;
 import io.runcycles.demo.client.spring.service.ProgrammaticClientService;
+import io.runcycles.demo.client.spring.service.SelfInvocationDemoService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +30,9 @@ public class DemoController {
 
     @Autowired
     private EventService eventService;
+
+    @Autowired
+    private SelfInvocationDemoService selfInvocationDemoService;
 
     // ---- Annotation Showcase Endpoints ----
 
@@ -147,6 +151,19 @@ public class DemoController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/annotation/self-invocation")
+    public ResponseEntity<Map<String, Object>> annotationSelfInvocation(
+            @RequestParam(defaultValue = "hello world") String input) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("scenario", "Correct workaround for Spring AOP self-invocation — @Cycles method in a separate bean");
+        response.put("pattern", "SelfInvocationDemoService delegates to GuardedLlmService (separate bean), " +
+                "so the call goes through the Spring proxy and @Cycles is intercepted");
+        response.put("result", selfInvocationDemoService.handleRequest(input));
+        response.put("note", "Calling a @Cycles method internally within the same class (this.method()) " +
+                "bypasses the proxy and the aspect never fires. Extract to a separate bean to fix.");
+        return ResponseEntity.ok(response);
+    }
+
     // ---- Programmatic Client Endpoints ----
 
     @PostMapping("/client/reserve-commit")
@@ -250,6 +267,9 @@ public class DemoController {
         endpoints.add(endpointInfo("POST", "/api/demo/annotation/dry-run?amount=500",
                 "@Cycles with dryRun=true (shadow-mode)",
                 "curl -X POST " + base + "/api/demo/annotation/dry-run?amount=500"));
+        endpoints.add(endpointInfo("POST", "/api/demo/annotation/self-invocation?input=hello",
+                "Self-invocation workaround — @Cycles method in separate bean",
+                "curl -X POST " + base + "/api/demo/annotation/self-invocation?input=hello"));
 
         // Programmatic client
         endpoints.add(endpointInfo("POST", "/api/demo/client/reserve-commit?estimate=5000",

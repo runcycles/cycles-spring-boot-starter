@@ -546,6 +546,77 @@ This starter implements the [Cycles Protocol v0](https://github.com/runcycles/cy
 | `X-Idempotency-Key` header | Implemented | Sent automatically on all POST requests |
 | `Subject.dimensions` | Implemented | Via `@Cycles(dimensions = {"key=value"})` |
 
+## Self-Invocation (Internal Method Calls)
+
+Spring's proxy-based AOP **does not intercept internal method calls** within the same class. If a method calls another method in the same bean using `this.method()`, the call bypasses the proxy and the `@Cycles` aspect never fires.
+
+```java
+// BROKEN — @Cycles is silently ignored on internal calls
+@Service
+public class MyService {
+
+    public String handleRequest(String input) {
+        return guardedCall(input);  // calls this.guardedCall() — bypasses proxy
+    }
+
+    @Cycles("#input.length() * 10")
+    public String guardedCall(String input) {
+        return "Processed: " + input;  // @Cycles never activates
+    }
+}
+```
+
+### Workaround 1: Extract to a Separate Bean (Recommended)
+
+Move the `@Cycles`-annotated method into its own `@Service` and inject it:
+
+```java
+@Service
+public class GuardedService {
+
+    @Cycles("#input.length() * 10")
+    public String guardedCall(String input) {
+        return "Processed: " + input;  // @Cycles works — called through proxy
+    }
+}
+
+@Service
+public class MyService {
+
+    @Autowired
+    private GuardedService guardedService;
+
+    public String handleRequest(String input) {
+        return guardedService.guardedCall(input);
+    }
+}
+```
+
+### Workaround 2: Self-Inject the Proxy
+
+If extracting a bean is impractical, inject the proxy of your own class using `@Lazy`:
+
+```java
+@Service
+public class MyService {
+
+    @Lazy
+    @Autowired
+    private MyService self;
+
+    public String handleRequest(String input) {
+        return self.guardedCall(input);  // calls through proxy — @Cycles works
+    }
+
+    @Cycles("#input.length() * 10")
+    public String guardedCall(String input) {
+        return "Processed: " + input;
+    }
+}
+```
+
+> **Startup warning:** The starter logs a `WARN` at startup when it detects a bean where some methods have `@Cycles` and others do not, since this pattern is susceptible to self-invocation issues. The warning is informational — it does not block startup.
+
 ## Threading Model
 
 `CyclesContextHolder` uses `ThreadLocal` to propagate reservation context to the guarded method. This works correctly with blocking Spring MVC but **does not work with reactive WebFlux pipelines**. Context will not propagate across reactive operator boundaries (e.g. `Mono.flatMap`, `Flux.map`), and calling `CyclesContextHolder.get()` from a scheduler thread will return `null`.
