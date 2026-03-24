@@ -89,7 +89,7 @@ public class CyclesRequestBuilderService {
             body.put("grace_period_ms", cycles.gracePeriodMs());
         }
 
-        if (!"REJECT".equals(cycles.overagePolicy())) {
+        if (!"ALLOW_IF_AVAILABLE".equals(cycles.overagePolicy())) {
             validateOveragePolicy(cycles.overagePolicy());
             ValidationUtils.putIfNotBlank(body, "overage_policy", cycles.overagePolicy());
         }
@@ -232,7 +232,7 @@ public class CyclesRequestBuilderService {
         body.put("action", action);
         body.put("actual", buildActual(cycles, actualAmount));
 
-        if (!"REJECT".equals(cycles.overagePolicy())) {
+        if (!"ALLOW_IF_AVAILABLE".equals(cycles.overagePolicy())) {
             validateOveragePolicy(cycles.overagePolicy());
             ValidationUtils.putIfNotBlank(body, "overage_policy", cycles.overagePolicy());
         }

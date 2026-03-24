@@ -148,7 +148,7 @@ public @interface Cycles {
      *
      * @return the overage policy name
      */
-    String overagePolicy() default "REJECT";
+    String overagePolicy() default "ALLOW_IF_AVAILABLE";
 
     /**
      * Shadow-mode evaluation. If true, the server evaluates the reservation

@@ -60,7 +60,7 @@ class CyclesRequestBuilderServiceCoverageTest {
     class TtlMsZero {
         @Test
         void shouldNotIncludeTtlWhenZero() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 0, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 0, 5000, "ALLOW_IF_AVAILABLE", false);
             Map<String, Object> body = service.buildReservation(cycles, 100, "llm", "gpt", null);
             assertThat(body).doesNotContainKey("ttl_ms");
         }
@@ -71,7 +71,7 @@ class CyclesRequestBuilderServiceCoverageTest {
     class GracePeriodNegative {
         @Test
         void shouldNotIncludeGracePeriodWhenNegative() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, -1, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, -1, "ALLOW_IF_AVAILABLE", false);
             Map<String, Object> body = service.buildReservation(cycles, 100, "llm", "gpt", null);
             assertThat(body).doesNotContainKey("grace_period_ms");
         }
@@ -82,7 +82,7 @@ class CyclesRequestBuilderServiceCoverageTest {
     class Dimensions {
         @Test
         void shouldIncludeDimensions() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             when(cycles.dimensions()).thenReturn(new String[]{"region=us-east", "team=backend"});
 
             Map<String, Object> body = service.buildReservation(cycles, 100, "llm", "gpt", null);
@@ -98,7 +98,7 @@ class CyclesRequestBuilderServiceCoverageTest {
     class BuildEventMetrics {
         @Test
         void shouldIncludeMetricsAndMetadata() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             var metrics = new CyclesMetrics();
             metrics.setTokensInput(10);
             Map<String, Object> metadata = Map.of("session", "abc");
@@ -117,7 +117,7 @@ class CyclesRequestBuilderServiceCoverageTest {
     class BuildDecisionMetadata {
         @Test
         void shouldIncludeMetadata() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             Map<String, Object> metadata = Map.of("session", "abc");
 
             Map<String, Object> body = service.buildDecision(
@@ -132,7 +132,7 @@ class CyclesRequestBuilderServiceCoverageTest {
     class BuildCommitMetadata {
         @Test
         void shouldIncludeMetadata() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             Map<String, Object> metadata = Map.of("session", "abc");
 
             Map<String, Object> body = service.buildCommit(cycles, 100, null, metadata);
@@ -186,7 +186,7 @@ class CyclesRequestBuilderServiceCoverageTest {
     class MandatoryValidation {
         @Test
         void rejectBlankActionKind() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             assertThatThrownBy(() -> service.buildReservation(cycles, 100, "", "gpt", null))
                     .isInstanceOf(CyclesProtocolException.class)
                     .hasMessageContaining("actionKind");
@@ -194,7 +194,7 @@ class CyclesRequestBuilderServiceCoverageTest {
 
         @Test
         void rejectBlankActionName() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             assertThatThrownBy(() -> service.buildReservation(cycles, 100, "llm", "", null))
                     .isInstanceOf(CyclesProtocolException.class)
                     .hasMessageContaining("actionName");
@@ -202,7 +202,7 @@ class CyclesRequestBuilderServiceCoverageTest {
 
         @Test
         void rejectBlankUnit() {
-            Cycles cycles = mockCycles("test-tenant", "", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             assertThatThrownBy(() -> service.buildReservation(cycles, 100, "llm", "gpt", null))
                     .isInstanceOf(CyclesProtocolException.class)
                     .hasMessageContaining("unit");
@@ -214,7 +214,7 @@ class CyclesRequestBuilderServiceCoverageTest {
     class BuildEventNegativeActual {
         @Test
         void shouldReject() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             assertThatThrownBy(() -> service.buildEvent(cycles, -1, "tool", "search", null, null, null))
                     .isInstanceOf(CyclesProtocolException.class);
         }

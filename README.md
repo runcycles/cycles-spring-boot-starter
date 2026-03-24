@@ -174,7 +174,7 @@ cycles:
 | `unit` | No | `USD_MICROCENTS` | Cost unit: `USD_MICROCENTS`, `TOKENS`, `CREDITS`, `RISK_POINTS` |
 | `ttlMs` | No | `60000` | Reservation TTL in milliseconds (1,000–86,400,000) |
 | `gracePeriodMs` | No | `-1` (server default) | Grace period for late commits (0–60,000 ms, server default: 5,000) |
-| `overagePolicy` | No | `REJECT` | `REJECT`, `ALLOW_IF_AVAILABLE`, or `ALLOW_WITH_OVERDRAFT` |
+| `overagePolicy` | No | `ALLOW_IF_AVAILABLE` | `REJECT`, `ALLOW_IF_AVAILABLE`, or `ALLOW_WITH_OVERDRAFT` |
 | `dryRun` | No | `false` | Shadow-mode: server evaluates without persisting; method does NOT execute |
 | `dimensions` | No | `{}` | Custom Subject dimensions as `"key=value"` pairs |
 | `tenant` | No | `""` | Override tenant (falls back to config, then resolver) |

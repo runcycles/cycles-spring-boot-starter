@@ -220,7 +220,7 @@ ReservationCreateRequest.builder()
 **Spec:** Defines defaults for several fields:
 - `ttl_ms` default: `60000`
 - `grace_period_ms` default: `5000`
-- `overage_policy` default: `REJECT`
+- `overage_policy` default: `ALLOW_IF_AVAILABLE`
 - `dry_run` default: `false`
 
 **Client:** The `ReservationCreateRequest.Builder` initializes these to spec defaults:
@@ -228,11 +228,11 @@ ReservationCreateRequest.builder()
 ```java
 private Long ttlMs = 60000L;
 private Long gracePeriodMs = 5000L;
-private CommitOveragePolicy overagePolicy = CommitOveragePolicy.REJECT;
+private CommitOveragePolicy overagePolicy = CommitOveragePolicy.ALLOW_IF_AVAILABLE;
 private Boolean dryRun = false;
 ```
 
-Since `toMap()` includes all non-null fields, requests built via the typed DTO always include `ttl_ms`, `grace_period_ms`, `overage_policy`, and `dry_run` — even when they match the server's defaults. The annotation-based path (`CyclesRequestBuilderService.buildReservation()`) correctly omits `overage_policy` when `REJECT` and `dry_run` when `false`.
+Since `toMap()` includes all non-null fields, requests built via the typed DTO always include `ttl_ms`, `grace_period_ms`, `overage_policy`, and `dry_run` — even when they match the server's defaults. The annotation-based path (`CyclesRequestBuilderService.buildReservation()`) correctly omits `overage_policy` when `ALLOW_IF_AVAILABLE` and `dry_run` when `false`.
 
 **Impact:** Slightly verbose request payloads. Not a protocol violation (server accepts explicit defaults).
 

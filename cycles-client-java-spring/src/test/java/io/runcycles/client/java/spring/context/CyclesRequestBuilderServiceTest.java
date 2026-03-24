@@ -66,7 +66,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldBuildValidReservation() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
 
             Map<String, Object> body = service.buildReservation(cycles, 1000, "llm.completion", "gpt-4", null);
 
@@ -76,7 +76,7 @@ class CyclesRequestBuilderServiceTest {
             assertThat(body.get("estimate")).isNotNull();
             assertThat(body.get("ttl_ms")).isEqualTo(60000L);
             assertThat(body.get("grace_period_ms")).isEqualTo(5000L);
-            // REJECT is default, should not be in body
+            // ALLOW_IF_AVAILABLE is default, should not be in body
             assertThat(body).doesNotContainKey("overage_policy");
             assertThat(body).doesNotContainKey("dry_run");
         }
@@ -84,16 +84,16 @@ class CyclesRequestBuilderServiceTest {
         @Test
         void shouldIncludeNonDefaultOveragePolicy() {
             Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000,
-                    "ALLOW_WITH_OVERDRAFT", false);
+                    "REJECT", false);
 
             Map<String, Object> body = service.buildReservation(cycles, 1000, "llm.completion", "gpt-4", null);
 
-            assertThat(body.get("overage_policy")).isEqualTo("ALLOW_WITH_OVERDRAFT");
+            assertThat(body.get("overage_policy")).isEqualTo("REJECT");
         }
 
         @Test
         void shouldIncludeDryRunWhenTrue() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", true);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", true);
 
             Map<String, Object> body = service.buildReservation(cycles, 1000, "llm.completion", "gpt-4", null);
 
@@ -102,7 +102,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldRejectMissingTenant() {
-            Cycles cycles = mockCycles("", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             when(resolver.resolve("tenant", "")).thenReturn("");
 
             assertThatThrownBy(() ->
@@ -113,7 +113,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldRejectInvalidUnit() {
-            Cycles cycles = mockCycles("test-tenant", "INVALID_UNIT", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "INVALID_UNIT", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
 
             assertThatThrownBy(() ->
                     service.buildReservation(cycles, 1000, "llm.completion", "gpt-4", null))
@@ -123,7 +123,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldRejectTtlMsBelowMinimum() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 500, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 500, 5000, "ALLOW_IF_AVAILABLE", false);
 
             assertThatThrownBy(() ->
                     service.buildReservation(cycles, 1000, "llm.completion", "gpt-4", null))
@@ -133,7 +133,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldRejectTtlMsAboveMaximum() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 86400001, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 86400001, 5000, "ALLOW_IF_AVAILABLE", false);
 
             assertThatThrownBy(() ->
                     service.buildReservation(cycles, 1000, "llm.completion", "gpt-4", null))
@@ -143,7 +143,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldRejectGracePeriodAboveMaximum() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 60001, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 60001, "ALLOW_IF_AVAILABLE", false);
 
             assertThatThrownBy(() ->
                     service.buildReservation(cycles, 1000, "llm.completion", "gpt-4", null))
@@ -153,7 +153,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldRejectNegativeAmount() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
 
             assertThatThrownBy(() ->
                     service.buildReservation(cycles, -1, "llm.completion", "gpt-4", null))
@@ -172,7 +172,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldIncludeMetadata() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             Map<String, Object> metadata = Map.of("session_id", "abc123");
 
             Map<String, Object> body = service.buildReservation(cycles, 1000, "llm.completion", "gpt-4", metadata);
@@ -191,7 +191,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldBuildValidCommit() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
 
             Map<String, Object> body = service.buildCommit(cycles, 800, null, null);
 
@@ -206,7 +206,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldIncludeMetrics() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             var metrics = new CyclesMetrics();
             metrics.setTokensInput(100);
 
@@ -281,7 +281,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldBuildValidDecision() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
 
             Map<String, Object> body = service.buildDecision(cycles, 1000, "llm.completion", "gpt-4", null);
 
@@ -306,7 +306,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldBuildValidEvent() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
 
             Map<String, Object> body = service.buildEvent(
                     cycles, 500, "tool.search", "web-search", null, 1700000000000L, null);
@@ -316,19 +316,19 @@ class CyclesRequestBuilderServiceTest {
             assertThat(body.get("action")).isNotNull();
             assertThat(body.get("actual")).isNotNull();
             assertThat(body.get("client_time_ms")).isEqualTo(1700000000000L);
-            // REJECT is default, should not be in body
+            // ALLOW_IF_AVAILABLE is default, should not be in body
             assertThat(body).doesNotContainKey("overage_policy");
         }
 
         @Test
         void shouldIncludeNonDefaultOveragePolicy() {
             Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000,
-                    "ALLOW_IF_AVAILABLE", false);
+                    "REJECT", false);
 
             Map<String, Object> body = service.buildEvent(
                     cycles, 500, "tool.search", "web-search", null, null, null);
 
-            assertThat(body.get("overage_policy")).isEqualTo("ALLOW_IF_AVAILABLE");
+            assertThat(body.get("overage_policy")).isEqualTo("REJECT");
         }
     }
 
@@ -391,7 +391,7 @@ class CyclesRequestBuilderServiceTest {
         @Test
         void shouldRejectTenantExceedingMaxLength() {
             String longTenant = "t".repeat(129);
-            Cycles cycles = mockCycles(longTenant, "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles(longTenant, "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             when(resolver.resolve("tenant", longTenant)).thenReturn(longTenant);
 
             assertThatThrownBy(() ->
@@ -403,7 +403,7 @@ class CyclesRequestBuilderServiceTest {
         @Test
         void shouldAcceptTenantAtMaxLength() {
             String maxTenant = "t".repeat(128);
-            Cycles cycles = mockCycles(maxTenant, "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles(maxTenant, "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             when(resolver.resolve("tenant", maxTenant)).thenReturn(maxTenant);
 
             Map<String, Object> body = service.buildReservation(cycles, 1000, "llm", "test", null);
@@ -421,7 +421,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldRejectActionKindExceedingMaxLength() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             String longKind = "k".repeat(65);
 
             assertThatThrownBy(() ->
@@ -432,7 +432,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldRejectActionNameExceedingMaxLength() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             String longName = "n".repeat(257);
 
             assertThatThrownBy(() ->
@@ -453,7 +453,7 @@ class CyclesRequestBuilderServiceTest {
         @Test
         @SuppressWarnings("unchecked")
         void shouldIncludeActionTags() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             when(cycles.actionTags()).thenReturn(new String[]{"prod", "billing"});
 
             Map<String, Object> body = service.buildReservation(cycles, 1000, "llm", "gpt-4", null);
@@ -473,7 +473,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldRejectNegativeActualAmount() {
-            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
 
             assertThatThrownBy(() ->
                     service.buildCommit(cycles, -1, null, null))
@@ -492,7 +492,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldRejectMissingTenant() {
-            Cycles cycles = mockCycles("", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             when(resolver.resolve("tenant", "")).thenReturn("");
 
             assertThatThrownBy(() ->
@@ -522,7 +522,7 @@ class CyclesRequestBuilderServiceTest {
 
         @Test
         void shouldRejectMissingTenant() {
-            Cycles cycles = mockCycles("", "TOKENS", 60000, 5000, "REJECT", false);
+            Cycles cycles = mockCycles("", "TOKENS", 60000, 5000, "ALLOW_IF_AVAILABLE", false);
             when(resolver.resolve("tenant", "")).thenReturn("");
 
             assertThatThrownBy(() ->
