@@ -5,59 +5,43 @@ import java.util.Map;
 
 /**
  * Typed result for {@code POST /v1/events}.
- * Matches server's EventCreateResponse: status, event_id, balances.
+ * Matches server's EventCreateResponse: status, event_id, charged, balances.
  * Spec constrains status to enum {@code [APPLIED]}.
  */
 public class EventResult {
     private final EventStatus status;
     private final String eventId;
+    private final Amount charged;
     private final List<Balance> balances;
 
-    private EventResult(EventStatus status, String eventId, List<Balance> balances) {
+    private EventResult(EventStatus status, String eventId, Amount charged, List<Balance> balances) {
         this.status = status;
         this.eventId = eventId;
+        this.charged = charged;
         this.balances = balances;
     }
 
-    /**
-     * Deserializes an {@code EventResult} from a raw API response map.
-     *
-     * @param map the response body map, or {@code null}
-     * @return the parsed result, or {@code null} if the input is {@code null}
-     */
     @SuppressWarnings("unchecked")
     public static EventResult fromMap(Map<String, Object> map) {
         if (map == null) return null;
         return new EventResult(
                 EventStatus.fromString(map.get("status") instanceof String s ? s : null),
                 map.get("event_id") instanceof String s ? s : null,
+                Amount.fromMap(map.get("charged") instanceof Map<?, ?> m ? (Map<String, Object>) m : null),
                 Balance.listFromRaw(map.get("balances") instanceof List<?> l ? l : null)
         );
     }
 
-    /**
-     * Returns the event status.
-     *
-     * @return The event status
-     */
     public EventStatus getStatus() { return status; }
-    /**
-     * Returns the server-assigned event ID.
-     *
-     * @return The server-assigned event id
-     */
     public String getEventId() { return eventId; }
-    /**
-     * Returns the updated balances after the event.
-     *
-     * @return The updated balances after the event
-     */
+    public Amount getCharged() { return charged; }
     public List<Balance> getBalances() { return balances; }
 
     @Override
     public String toString() {
         return "EventResult{status=" + status +
                 ", eventId='" + eventId + '\'' +
+                ", charged=" + charged +
                 ", balances=" + balances + '}';
     }
 }

@@ -17,6 +17,10 @@ public enum ErrorCode {
     NOT_FOUND,
     /** The budget has been fully consumed; no further reservations can be made. */
     BUDGET_EXCEEDED,
+    /** The budget has been frozen by an administrator; blocks new reservations and events. */
+    BUDGET_FROZEN,
+    /** The budget has been closed by an administrator; terminal state. */
+    BUDGET_CLOSED,
     /** The reservation has expired and can no longer be committed or extended. */
     RESERVATION_EXPIRED,
     /** The reservation has already been committed or released. */
@@ -29,18 +33,13 @@ public enum ErrorCode {
     OVERDRAFT_LIMIT_EXCEEDED,
     /** Outstanding debt must be settled before new reservations are allowed. */
     DEBT_OUTSTANDING,
+    /** The reservation has been extended the maximum number of times allowed. */
+    MAX_EXTENSIONS_EXCEEDED,
     /** A transient server-side error occurred (retryable). */
     INTERNAL_ERROR,
     /** An error code not recognized by this client version. */
     UNKNOWN;
 
-    /**
-     * Parses an error code from its string representation.
-     *
-     * @param value the error code string, or {@code null}
-     * @return the matching {@code ErrorCode}, {@link #UNKNOWN} for unrecognized values,
-     *         or {@code null} if the input is {@code null}
-     */
     public static ErrorCode fromString(String value) {
         if (value == null) return null;
         try {
@@ -50,11 +49,6 @@ public enum ErrorCode {
         }
     }
 
-    /**
-     * Returns {@code true} if this error code indicates a transient failure that may succeed on retry.
-     *
-     * @return {@code true} if this error code indicates a transient failure that may succeed on retry
-     */
     public boolean isRetryable() {
         return this == INTERNAL_ERROR || this == UNKNOWN;
     }
