@@ -119,7 +119,7 @@ public class ReservationCreateRequest {
         private Amount estimate;
         private Long ttlMs = 60000L;
         private Long gracePeriodMs = 5000L;
-        private CommitOveragePolicy overagePolicy = CommitOveragePolicy.REJECT;
+        private CommitOveragePolicy overagePolicy = CommitOveragePolicy.ALLOW_IF_AVAILABLE;
         private Boolean dryRun = false;
         private Map<String, Object> metadata;
 

@@ -68,7 +68,7 @@ class CyclesLifecycleServiceCoverageTest {
         when(cycles.unit()).thenReturn("TOKENS");
         when(cycles.ttlMs()).thenReturn(60000L);
         when(cycles.gracePeriodMs()).thenReturn(5000L);
-        when(cycles.overagePolicy()).thenReturn("REJECT");
+        when(cycles.overagePolicy()).thenReturn("ALLOW_IF_AVAILABLE");
         when(cycles.dryRun()).thenReturn(dryRun);
         when(cycles.tenant()).thenReturn("test-tenant");
         when(cycles.workspace()).thenReturn("");

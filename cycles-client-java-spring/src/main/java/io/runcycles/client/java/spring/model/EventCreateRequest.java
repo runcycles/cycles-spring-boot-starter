@@ -108,7 +108,7 @@ public class EventCreateRequest {
         private Subject subject;
         private Action action;
         private Amount actual;
-        private CommitOveragePolicy overagePolicy = CommitOveragePolicy.REJECT;
+        private CommitOveragePolicy overagePolicy = CommitOveragePolicy.ALLOW_IF_AVAILABLE;
         private CyclesMetrics metrics;
         private Long clientTimeMs;
         private Map<String, Object> metadata;
