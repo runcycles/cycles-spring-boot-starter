@@ -98,6 +98,24 @@ public String generateText(String prompt, int tokens) { ... }
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### Budget outcome by scenario
+
+| Scenario | Outcome | Detail |
+|---|---|---|
+| Reservation denied | **Neither** | `CyclesProtocolException` thrown; method never executes. Error may be `BUDGET_EXCEEDED`, `OVERDRAFT_LIMIT_EXCEEDED`, or `DEBT_OUTSTANDING` |
+| `dryRun = true`, any decision | **Neither** | Returns `DryRunResult` or throws; no real reservation created |
+| Method returns successfully | **Commit** | Actual amount charged; unused remainder auto-released |
+| Method throws any exception | **Release** | Full reserved amount returned to budget; exception re-thrown |
+| Commit fails (5xx / network) | **Retry** | Exponential backoff; see `cycles.retry.*` config |
+| Commit fails (non-retryable 4xx) | **Release** | Reservation released after non-retryable client error |
+| Commit gets RESERVATION_EXPIRED | **Neither** | Server already reclaimed budget on TTL expiry |
+| Commit gets RESERVATION_FINALIZED | **Neither** | Already committed or released (idempotent replay) |
+| Commit gets IDEMPOTENCY_MISMATCH | **Neither** | Previous commit already processed; no release attempted |
+
+All exceptions from the guarded method trigger release — no distinction between checked and unchecked exceptions.
+
+See [How Reserve-Commit Works](https://runcycles.io/protocol/how-reserve-commit-works-in-cycles) for the full protocol-level explanation.
+
 ### Decisions
 
 The Cycles server returns one of three decisions on reservation:
