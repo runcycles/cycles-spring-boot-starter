@@ -7,7 +7,7 @@
 
     <groupId>com.example</groupId>
     <artifactId>cycles-demo-client-java-spring</artifactId>
-    <version>0.1.1</version>
+    <version>0.2.0</version>
     <packaging>jar</packaging>
 
     <name>Cycles demo client for JAVA Spring</name>
@@ -47,7 +47,7 @@
         <dependency>
             <groupId>io.runcycles</groupId>
             <artifactId>cycles-client-java-spring</artifactId>
-            <version>0.1.1</version>
+            <version>0.2.0</version>
         </dependency>
 
         <dependency>
