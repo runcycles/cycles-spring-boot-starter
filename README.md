@@ -1,6 +1,6 @@
 [![CI](https://github.com/runcycles/cycles-spring-boot-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/runcycles/cycles-spring-boot-starter/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-85%25+-brightgreen)](https://github.com/runcycles/cycles-spring-boot-starter/actions)
+[![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)](https://github.com/runcycles/cycles-spring-boot-starter/actions)
 
 # Cycles Spring Boot Starter
 
