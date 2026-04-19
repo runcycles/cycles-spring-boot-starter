@@ -20,10 +20,18 @@ public class LlmController {
     private LlmService llmService;
 
     @PostMapping("/generate")
-    public String generate(
+    public ResponseEntity<Map<String, Object>> generate(
             @RequestParam String prompt,
             @RequestParam int tokens) {
-        return llmService.generateText(prompt, tokens);
+        // Wrap in a JSON body so the user-supplied prompt — which the LLM
+        // typically echoes back — is serialized as a JSON string rather
+        // than streamed raw as text/plain. Eliminates the reflected-XSS
+        // surface that CodeQL (java/xss) flags on the bare `String` return.
+        String result = llmService.generateText(prompt, tokens);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("prompt", prompt);
+        body.put("response", result);
+        return ResponseEntity.ok(body);
     }
     @PostMapping ("/chat")
     public ResponseEntity<Map<String,Object>> handleChat(@RequestBody Map<String,Object> request) {
