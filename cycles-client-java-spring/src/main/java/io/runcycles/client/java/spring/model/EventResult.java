@@ -21,6 +21,12 @@ public class EventResult {
         this.balances = balances;
     }
 
+    /**
+     * Deserializes the {@code POST /v1/events} response body.
+     *
+     * @param map the parsed JSON body, or {@code null}
+     * @return the typed result, or {@code null} when {@code map} is {@code null}
+     */
     @SuppressWarnings("unchecked")
     public static EventResult fromMap(Map<String, Object> map) {
         if (map == null) return null;
@@ -32,9 +38,32 @@ public class EventResult {
         );
     }
 
+    /**
+     * Returns the server-reported event status (currently always {@code APPLIED}).
+     *
+     * @return the event status
+     */
     public EventStatus getStatus() { return status; }
+
+    /**
+     * Returns the server-assigned event identifier.
+     *
+     * @return the event id, or {@code null} if absent
+     */
     public String getEventId() { return eventId; }
+
+    /**
+     * Returns the amount charged for this event.
+     *
+     * @return the charged amount, or {@code null} if absent
+     */
     public Amount getCharged() { return charged; }
+
+    /**
+     * Returns the post-event balances for the affected scopes.
+     *
+     * @return the balances, or {@code null} if not returned
+     */
     public List<Balance> getBalances() { return balances; }
 
     @Override

@@ -171,7 +171,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-ctx")));
@@ -211,7 +211,7 @@ class CyclesLifecycleServiceTest {
                     .thenReturn(1000L);
             when(evaluator.evaluate(eq("#result.length()"), eq(method), eq(args), eq("hello"), eq(target)))
                     .thenReturn(5L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-actual")));
@@ -246,7 +246,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, denyResponse()));
@@ -282,7 +282,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowWithCapsResponse("res-caps")));
@@ -323,7 +323,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-dry")));
@@ -350,7 +350,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, denyResponse()));
@@ -381,7 +381,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
 
             Map<String, Object> errorBody = Map.of(
@@ -418,7 +418,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-fail")));
@@ -458,7 +458,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-retry")));
@@ -485,7 +485,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-5xx")));
@@ -513,7 +513,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-fin")));
@@ -542,7 +542,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-idem")));
@@ -571,7 +571,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-4xx")));
@@ -602,7 +602,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-exc")));
@@ -692,7 +692,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-noactual")));
@@ -726,7 +726,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
 
             Map<String, Object> responseWithoutId = new HashMap<>();
@@ -763,7 +763,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-metrics")));
@@ -812,7 +812,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-hb")));
@@ -841,7 +841,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-hb-min")));
@@ -869,7 +869,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
 
             // Response without expires_at_ms
@@ -904,7 +904,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-zero-ttl")));
@@ -936,7 +936,7 @@ class CyclesLifecycleServiceTest {
                     .thenAnswer(inv -> mockFuture);
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-cancel")));
@@ -967,7 +967,7 @@ class CyclesLifecycleServiceTest {
                     .thenAnswer(inv -> mockFuture);
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-cancel-fail")));
@@ -1006,7 +1006,7 @@ class CyclesLifecycleServiceTest {
             Map<String, Object> extendResponseBody = Map.of("status", "ACTIVE", "expires_at_ms", newExpiresAtMs);
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-extend")));
@@ -1053,7 +1053,7 @@ class CyclesLifecycleServiceTest {
                     });
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-ext-fail")));
@@ -1103,7 +1103,7 @@ class CyclesLifecycleServiceTest {
                     });
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-ext-exc")));
@@ -1144,7 +1144,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
 
             // Server returns unrecognized decision string like "THROTTLE"
@@ -1182,7 +1182,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
 
             // Return a 2xx response with null body -> ReservationResult.fromMap(null) returns null
@@ -1215,7 +1215,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-relfail")));
@@ -1245,7 +1245,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-relexc")));
@@ -1284,7 +1284,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-expired")));
@@ -1322,7 +1322,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-weird")));
@@ -1362,7 +1362,7 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
 
             // Error response body without structured error fields (no "error"/"message"/"request_id")

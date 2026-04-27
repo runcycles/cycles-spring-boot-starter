@@ -16,7 +16,7 @@ Cycles enforces budget reservations around guarded method executions using a **r
 <dependency>
     <groupId>io.runcycles</groupId>
     <artifactId>cycles-client-java-spring</artifactId>
-    <version>0.2.0</version>
+    <version>0.2.1</version>
 </dependency>
 ```
 
@@ -233,6 +233,29 @@ Examples:
 // With explicit actual
 @Cycles(value = "#p1 * 10", actual = "#result.length() * 5")
 ```
+
+#### SpEL on subject fields
+
+The subject fields `tenant`, `workspace`, `app`, `workflow`, `agent`, and `toolset`
+also support SpEL. A value whose first non-whitespace character is `#` is evaluated
+against the method invocation; any other value is treated as a literal — so existing
+literal configurations (e.g. `workspace = "production"`) keep working unchanged.
+
+`#result` is **not** available on subject fields because they are resolved before
+the guarded method runs (they go into the reservation request).
+
+```java
+@Cycles(value = "#tokens * 10", workspace = "#workspaceId")
+public Response runRequest(int tokens, String workspaceId) { ... }
+
+// Nested property
+@Cycles(value = "#req.tokens", workspace = "#req.workspaceId")
+public Response runRequest(Request req) { ... }
+```
+
+If a SpEL expression evaluates to `null` (e.g. `workspace = "#req?.workspaceId"`
+with a null property), the resolver falls through to the configured default and
+finally to a `CyclesFieldResolver` bean, just as if the annotation value were blank.
 
 ## Accessing Caps in Your Method
 

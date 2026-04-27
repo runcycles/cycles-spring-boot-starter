@@ -245,3 +245,14 @@ Since `toMap()` includes all non-null fields, requests built via the typed DTO a
 The client is **fully protocol-conformant** with the Cycles Protocol v0.1.23 OpenAPI spec. All 9 endpoints, 6 request schemas, 10 response schemas, 5 enum types, and all nested object serializations match the spec exactly. JSON field names use correct snake_case mapping throughout. Auth headers, idempotency handling, and subject validation all follow spec normative rules.
 
 Three low-severity gaps identified (response header capture, typed DTO validation, default value handling) — none are protocol violations; all are quality-of-life improvements for client consumers.
+
+---
+
+## Changelog
+
+### 2026-04-27 — Issue #49: SpEL on `@Cycles` subject fields + BeanPostProcessor warning
+
+- `CyclesExpressionEvaluator.evaluateString` resolves SpEL on `@Cycles` subject fields (`tenant`, `workspace`, `app`, `workflow`, `agent`, `toolset`) when the annotation value's first non-whitespace character is `#`. Literal values (e.g. `workspace = "production"`) bypass the parser and remain unchanged — fully backward-compatible. `#result` is intentionally not exposed because subject fields are resolved before the guarded method runs.
+- `CyclesRequestBuilderService` gains a context-aware `buildReservation` overload `(Cycles, long, String, String, Map, Method, Object[], Object)` that the AOP path uses. The existing 5-arg overload delegates with `null` invocation context (literal-only), so programmatic callers (`buildDecision`, `buildEvent`) keep their previous semantics.
+- `CyclesAutoConfiguration#cyclesSelfInvocationDetector` is now `static`, eliminating the Spring startup warning *"Bean ... is not eligible for getting processed by all BeanPostProcessors"* and ensuring the configuration class is properly post-processed.
+- New tests: `CyclesExpressionEvaluatorTest.EvaluateString` (literal/null/blank/`#var`/nested/safe-nav/non-String/leading-whitespace) and `CyclesRequestBuilderServiceTest.BuildReservationSpel` (end-to-end resolution of `@Cycles(workspace = "#workspaceId")` with fallback to resolver on null).

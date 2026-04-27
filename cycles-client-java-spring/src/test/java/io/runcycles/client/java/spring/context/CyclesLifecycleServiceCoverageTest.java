@@ -106,7 +106,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             // Return a response with null body which will make ReservationResult.fromMap return null
             when(client.createReservation(any(Object.class)))
@@ -133,7 +133,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
 
             Map<String, Object> body = new HashMap<>();
@@ -164,7 +164,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
 
             Map<String, Object> body = new HashMap<>();
@@ -251,7 +251,7 @@ class CyclesLifecycleServiceCoverageTest {
             when(cycles.useEstimateIfActualNotProvided()).thenReturn(false);
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("r1")));
@@ -281,7 +281,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-exp")));
@@ -313,7 +313,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-unk")));
@@ -346,7 +346,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
 
             // Error body without proper error response structure
@@ -375,7 +375,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
 
             Map<String, Object> body = new HashMap<>();
@@ -404,7 +404,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-no-ttl")));
@@ -435,7 +435,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-rel-fail")));
@@ -457,7 +457,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-rel-ex")));
@@ -488,7 +488,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
 
             Map<String, Object> body = new HashMap<>();
@@ -518,7 +518,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
 
             Map<String, Object> body = new HashMap<>();
@@ -548,7 +548,7 @@ class CyclesLifecycleServiceCoverageTest {
             Method method = dummyMethod();
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any()))
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-met")));
