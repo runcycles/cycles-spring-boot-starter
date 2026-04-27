@@ -9,6 +9,8 @@ import org.springframework.expression.*;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 
 import java.lang.reflect.Method;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * Evaluates SpEL expressions used in {@code @Cycles} annotations to compute
@@ -32,6 +34,11 @@ public class CyclesExpressionEvaluator {
     private static final Logger LOG = LoggerFactory.getLogger(CyclesExpressionEvaluator.class);
     private final ExpressionParser parser = new SpelExpressionParser();
     private final ParameterNameDiscoverer discoverer = new DefaultParameterNameDiscoverer();
+    private final ConcurrentMap<String, Expression> expressionCache = new ConcurrentHashMap<>();
+
+    private Expression parseCached(String expression) {
+        return expressionCache.computeIfAbsent(expression, parser::parseExpression);
+    }
 
     /**
      * Evaluates a SpEL expression to a non-negative {@code long} value.
@@ -50,7 +57,7 @@ public class CyclesExpressionEvaluator {
                          Object result,
                          Object target) {
         LOG.debug("Evaluating expression: expression={}, method={}, args={}, result={}, target={}", expression, method, args, result, target);
-        Expression exp = parser.parseExpression(expression);
+        Expression exp = parseCached(expression);
 
         MethodBasedEvaluationContext context =
                 new MethodBasedEvaluationContext(
@@ -83,5 +90,42 @@ public class CyclesExpressionEvaluator {
         }
 
         return longValue;
+    }
+
+    /**
+     * Resolves a string-valued attribute that may contain a SpEL expression.
+     *
+     * <p>If {@code value} starts with {@code #} (after leading whitespace), it is parsed
+     * and evaluated as SpEL against a {@link MethodBasedEvaluationContext} built from the
+     * given method invocation. Otherwise the value is returned verbatim — any literal that
+     * does not begin with {@code #} bypasses the parser entirely so existing literal
+     * configurations remain unaffected.
+     *
+     * <p>The evaluation context exposes the same {@code #args} and {@code #target}
+     * variables as {@link #evaluate}, plus all named method parameters. {@code #result}
+     * is intentionally not exposed: subject fields are evaluated before the guarded
+     * method runs.
+     *
+     * @param value  the raw annotation attribute, possibly a SpEL expression
+     * @param method the annotated method (for parameter name discovery); if {@code null},
+     *               {@code value} is returned as-is
+     * @param args   the method invocation arguments
+     * @param target the bean instance on which the method was invoked
+     * @return the resolved string, or {@code null} if the expression evaluates to {@code null}
+     */
+    public String evaluateString(String value, Method method, Object[] args, Object target) {
+        if (value == null || method == null) {
+            return value;
+        }
+        String trimmed = value.stripLeading();
+        if (trimmed.isEmpty() || !trimmed.startsWith("#")) {
+            return value;
+        }
+        Expression exp = parseCached(value);
+        MethodBasedEvaluationContext ctx = new MethodBasedEvaluationContext(target, method, args, discoverer);
+        ctx.setVariable("args", args);
+        ctx.setVariable("target", target);
+        Object result = exp.getValue(ctx);
+        return result == null ? null : result.toString();
     }
 }

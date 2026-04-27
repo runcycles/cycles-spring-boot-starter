@@ -56,36 +56,48 @@ public @interface Cycles {
 
     /**
      * Subject field: the tenant identifier. Falls back to config or resolver if blank.
+     * Supports SpEL: a value whose first non-whitespace character is {@code #}
+     * is evaluated against the method invocation (e.g. {@code tenant = "#tenantId"}).
      *
      * @return the tenant identifier, or empty string if unset
      */
     String tenant() default "";
     /**
      * Subject field: the workspace identifier. Falls back to config or resolver if blank.
+     * Supports SpEL: a value whose first non-whitespace character is {@code #}
+     * is evaluated against the method invocation (e.g. {@code workspace = "#workspaceId"}).
      *
      * @return the workspace identifier, or empty string if unset
      */
     String workspace() default "";
     /**
      * Subject field: the application identifier. Falls back to config or resolver if blank.
+     * Supports SpEL: a value whose first non-whitespace character is {@code #}
+     * is evaluated against the method invocation.
      *
      * @return the application identifier, or empty string if unset
      */
     String app() default "";
     /**
      * Subject field: the workflow identifier. Falls back to config or resolver if blank.
+     * Supports SpEL: a value whose first non-whitespace character is {@code #}
+     * is evaluated against the method invocation.
      *
      * @return the workflow identifier, or empty string if unset
      */
     String workflow() default "";
     /**
      * Subject field: the agent identifier. Falls back to config or resolver if blank.
+     * Supports SpEL: a value whose first non-whitespace character is {@code #}
+     * is evaluated against the method invocation.
      *
      * @return the agent identifier, or empty string if unset
      */
     String agent() default "";
     /**
      * Subject field: the toolset identifier. Falls back to config or resolver if blank.
+     * Supports SpEL: a value whose first non-whitespace character is {@code #}
+     * is evaluated against the method invocation.
      *
      * @return the toolset identifier, or empty string if unset
      */

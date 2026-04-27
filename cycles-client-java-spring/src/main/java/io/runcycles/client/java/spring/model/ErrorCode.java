@@ -40,6 +40,14 @@ public enum ErrorCode {
     /** An error code not recognized by this client version. */
     UNKNOWN;
 
+    /**
+     * Parses an error-code name into an {@link ErrorCode}, falling back to {@link #UNKNOWN}
+     * when the value is not recognized by this client version.
+     *
+     * @param value the error-code name (e.g. {@code "BUDGET_EXCEEDED"})
+     * @return the matching enum constant, {@link #UNKNOWN} for unrecognized values, or
+     *         {@code null} when {@code value} is {@code null}
+     */
     public static ErrorCode fromString(String value) {
         if (value == null) return null;
         try {
@@ -49,6 +57,12 @@ public enum ErrorCode {
         }
     }
 
+    /**
+     * Indicates whether this error code represents a transient condition for which
+     * a retry may succeed.
+     *
+     * @return {@code true} for {@link #INTERNAL_ERROR} and {@link #UNKNOWN}; {@code false} otherwise
+     */
     public boolean isRetryable() {
         return this == INTERNAL_ERROR || this == UNKNOWN;
     }

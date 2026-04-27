@@ -88,7 +88,7 @@ public class CyclesLifecycleService {
 
         // Create reservation
         Map<String, Object> createBody = requestBuilderService.buildReservation(
-                cycles, estimate, actionKind, actionName, null);
+                cycles, estimate, actionKind, actionName, null, method, args, target);
         LOG.debug("Creating reservation: createBody={}", createBody);
 
         long resT1 = System.currentTimeMillis();

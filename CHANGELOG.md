@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] - 2026-04-27
+
+### Fixed
+
+- Evaluate SpEL on `@Cycles` subject fields (`tenant`, `workspace`, `app`, `workflow`, `agent`, `toolset`) when the value's first non-whitespace character is `#`. Previously the literal expression string was sent to the server, producing a 400 `INVALID_REQUEST`. Literal values are unchanged. ([#49](https://github.com/runcycles/cycles-spring-boot-starter/issues/49))
+- Make `CyclesAutoConfiguration#cyclesSelfInvocationDetector` a `static` `@Bean` factory method, eliminating the Spring startup warning *"Bean ... is not eligible for getting processed by all BeanPostProcessors"*. ([#49](https://github.com/runcycles/cycles-spring-boot-starter/issues/49))
+
+### Changed
+
+- **Behavior change:** A SpEL expression on a `@Cycles` subject field that fails to **parse** (e.g. `#((bad`) or fails to **evaluate against actual values** (e.g. invalid property access) now surfaces at AOP entry as `ParseException` / `SpelEvaluationException` instead of producing a malformed reservation request. References to undefined variables still resolve to `null` and fall through to the config / resolver bean chain, matching `#req?.workspaceId` semantics.
+- `CyclesExpressionEvaluator` caches parsed `Expression` instances per raw expression string, removing the per-invocation parse cost on hot `@Cycles` paths.
+
 ## [0.2.0] - 2026-03-24
 
 Bug fixes, support 0.1.24 protocol spec.
@@ -74,6 +86,7 @@ Initial public release of cycles-client-java-spring.
 
 - Fix `UNAUTHORIZED` HTTP status code and enhance dry-run documentation ([#14](https://github.com/runcycles/cycles-spring-boot-starter/pull/14))
 
+[0.2.1]: https://github.com/runcycles/cycles-spring-boot-starter/releases/tag/v0.2.1
 [0.2.0]: https://github.com/runcycles/cycles-spring-boot-starter/releases/tag/v0.2.0
 [0.1.1]: https://github.com/runcycles/cycles-spring-boot-starter/releases/tag/v0.1.1
 [0.1.0]: https://github.com/runcycles/cycles-spring-boot-starter/releases/tag/v0.1.0

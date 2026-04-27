@@ -531,4 +531,67 @@ class CyclesRequestBuilderServiceTest {
                     .hasMessageContaining("tenant");
         }
     }
+
+    // ========================================================================
+    // buildReservation — SpEL on subject fields
+    // ========================================================================
+
+    @Nested
+    @DisplayName("buildReservation — SpEL on subject fields")
+    class BuildReservationSpel {
+
+        public static class Caller {
+            public String run(String workspaceId) { return "ok"; }
+        }
+
+        @Test
+        void shouldEvaluateSpelOnWorkspace() throws Exception {
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, -1, "ALLOW_IF_AVAILABLE", false);
+            when(cycles.workspace()).thenReturn("#workspaceId");
+            // resolver is a pass-through for whatever evaluateString produced
+            when(resolver.resolve("workspace", "ws-from-spel")).thenReturn("ws-from-spel");
+
+            java.lang.reflect.Method method = Caller.class.getMethod("run", String.class);
+            Map<String, Object> body = service.buildReservation(
+                    cycles, 1000, "llm.completion", "gpt-4", null,
+                    method, new Object[]{"ws-from-spel"}, new Caller());
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> subject = (Map<String, Object>) body.get("subject");
+            assertThat(subject.get("workspace")).isEqualTo("ws-from-spel");
+        }
+
+        @Test
+        void shouldLeaveLiteralWorkspaceUnchanged() throws Exception {
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, -1, "ALLOW_IF_AVAILABLE", false);
+            when(cycles.workspace()).thenReturn("production");
+            when(resolver.resolve("workspace", "production")).thenReturn("production");
+
+            java.lang.reflect.Method method = Caller.class.getMethod("run", String.class);
+            Map<String, Object> body = service.buildReservation(
+                    cycles, 1000, "llm.completion", "gpt-4", null,
+                    method, new Object[]{"ignored"}, new Caller());
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> subject = (Map<String, Object>) body.get("subject");
+            assertThat(subject.get("workspace")).isEqualTo("production");
+        }
+
+        @Test
+        void shouldFallBackToResolverWhenSpelEvaluatesToNull() throws Exception {
+            Cycles cycles = mockCycles("test-tenant", "TOKENS", 60000, -1, "ALLOW_IF_AVAILABLE", false);
+            when(cycles.workspace()).thenReturn("#workspaceId");
+            // SpEL evaluates to null; resolver chain should kick in and produce a fallback.
+            when(resolver.resolve("workspace", null)).thenReturn("from-resolver");
+
+            java.lang.reflect.Method method = Caller.class.getMethod("run", String.class);
+            Map<String, Object> body = service.buildReservation(
+                    cycles, 1000, "llm.completion", "gpt-4", null,
+                    method, new Object[]{null}, new Caller());
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> subject = (Map<String, Object>) body.get("subject");
+            assertThat(subject.get("workspace")).isEqualTo("from-resolver");
+        }
+    }
 }

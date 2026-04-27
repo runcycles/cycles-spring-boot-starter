@@ -114,14 +114,16 @@ public class CyclesAutoConfiguration {
      * Registers the request payload builder service.
      *
      * @param resolutionService the value resolution service
+     * @param evaluator         the SpEL expression evaluator
      * @return the request builder service
      */
     @Bean
     @ConditionalOnMissingBean
     public CyclesRequestBuilderService cyclesRequestBuilderService(
-            CyclesValueResolutionService resolutionService
+            CyclesValueResolutionService resolutionService,
+            CyclesExpressionEvaluator evaluator
     ) {
-        return new CyclesRequestBuilderService(resolutionService);
+        return new CyclesRequestBuilderService(resolutionService, evaluator);
     }
 
     /**
@@ -175,7 +177,7 @@ public class CyclesAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean
-    public CyclesSelfInvocationDetector cyclesSelfInvocationDetector() {
+    public static CyclesSelfInvocationDetector cyclesSelfInvocationDetector() {
         return new CyclesSelfInvocationDetector();
     }
 }

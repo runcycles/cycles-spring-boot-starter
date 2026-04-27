@@ -1,12 +1,14 @@
 package io.runcycles.client.java.spring.context;
 
 import io.runcycles.client.java.spring.annotation.Cycles;
+import io.runcycles.client.java.spring.evaluation.CyclesExpressionEvaluator;
 import io.runcycles.client.java.spring.evaluation.CyclesValueResolutionService;
 import io.runcycles.client.java.spring.model.CyclesMetrics;
 import io.runcycles.client.java.spring.model.CyclesProtocolException;
 import io.runcycles.client.java.spring.util.Constants;
 import io.runcycles.client.java.spring.util.ValidationUtils;
 
+import java.lang.reflect.Method;
 import java.util.*;
 
 /**
@@ -35,14 +37,27 @@ public class CyclesRequestBuilderService {
     private static final int MAX_ACTION_NAME_LENGTH = 256;
 
     private final CyclesValueResolutionService cyclesValueResolutionService;
+    private final CyclesExpressionEvaluator expressionEvaluator;
+
+    /**
+     * Creates a new request builder service with a default expression evaluator.
+     *
+     * @param cyclesValueResolutionService the value resolution service for subject fields
+     */
+    public CyclesRequestBuilderService(CyclesValueResolutionService cyclesValueResolutionService) {
+        this(cyclesValueResolutionService, new CyclesExpressionEvaluator());
+    }
 
     /**
      * Creates a new request builder service.
      *
      * @param cyclesValueResolutionService the value resolution service for subject fields
+     * @param expressionEvaluator          the SpEL evaluator used to resolve subject-field expressions
      */
-    public CyclesRequestBuilderService(CyclesValueResolutionService cyclesValueResolutionService) {
+    public CyclesRequestBuilderService(CyclesValueResolutionService cyclesValueResolutionService,
+                                       CyclesExpressionEvaluator expressionEvaluator) {
         this.cyclesValueResolutionService = cyclesValueResolutionService;
+        this.expressionEvaluator = expressionEvaluator;
     }
 
     /**
@@ -59,9 +74,34 @@ public class CyclesRequestBuilderService {
     public Map<String, Object> buildReservation(Cycles cycles, long estimatedAmount,
                                                  String actionKind, String actionName,
                                                  Map<String, Object> metadata) {
+        return buildReservation(cycles, estimatedAmount, actionKind, actionName, metadata, null, null, null);
+    }
+
+    /**
+     * Builds the request body for creating a new reservation, evaluating SpEL expressions
+     * on subject-field annotation attributes against the supplied method invocation.
+     *
+     * <p>Subject-field values starting with {@code #} (e.g. {@code workspace = "#workspaceId"})
+     * are resolved against the method's parameters; literal values are passed through unchanged.
+     *
+     * @param cycles          the annotation providing subject, action, and policy configuration
+     * @param estimatedAmount the estimated usage amount (must be &ge; 0)
+     * @param actionKind      the action category (e.g. class name)
+     * @param actionName      the action identifier (e.g. method name)
+     * @param metadata        optional metadata to include, or {@code null}
+     * @param method          the annotated method, or {@code null} to skip SpEL evaluation
+     * @param args            the method arguments, or {@code null} when {@code method} is {@code null}
+     * @param target          the target bean instance, or {@code null} when {@code method} is {@code null}
+     * @return a mutable map representing the JSON request body
+     * @throws CyclesProtocolException if validation fails
+     */
+    public Map<String, Object> buildReservation(Cycles cycles, long estimatedAmount,
+                                                 String actionKind, String actionName,
+                                                 Map<String, Object> metadata,
+                                                 Method method, Object[] args, Object target) {
         Objects.requireNonNull(cycles, "Cycles annotation must not be null");
 
-        Map<String, String> resolvedFields = resolveSubjectFields(cycles);
+        Map<String, String> resolvedFields = resolveSubjectFields(cycles, method, args, target);
         validateMandatory(resolvedFields, actionKind, actionName, estimatedAmount, cycles.unit());
 
         Map<String, Object> subject = buildSubject(resolvedFields, cycles.dimensions());
@@ -181,7 +221,7 @@ public class CyclesRequestBuilderService {
                                               Map<String, Object> metadata) {
         Objects.requireNonNull(cycles, "Cycles annotation must not be null");
 
-        Map<String, String> resolvedFields = resolveSubjectFields(cycles);
+        Map<String, String> resolvedFields = resolveSubjectFields(cycles, null, null, null);
         validateMandatory(resolvedFields, actionKind, actionName, estimatedAmount, cycles.unit());
 
         Map<String, Object> subject = buildSubject(resolvedFields, cycles.dimensions());
@@ -220,7 +260,7 @@ public class CyclesRequestBuilderService {
                                            Map<String, Object> metadata) {
         Objects.requireNonNull(cycles, "Cycles annotation must not be null");
 
-        Map<String, String> resolvedFields = resolveSubjectFields(cycles);
+        Map<String, String> resolvedFields = resolveSubjectFields(cycles, null, null, null);
         validateMandatory(resolvedFields, actionKind, actionName, actualAmount, cycles.unit());
 
         Map<String, Object> subject = buildSubject(resolvedFields, cycles.dimensions());
@@ -253,15 +293,21 @@ public class CyclesRequestBuilderService {
     // -------------------------
     // Subject
     // -------------------------
-    private Map<String, String> resolveSubjectFields(Cycles c) {
+    private Map<String, String> resolveSubjectFields(Cycles c, Method method, Object[] args, Object target) {
         Map<String, String> resolved = new HashMap<>();
-        resolved.put(Constants.TENANT, cyclesValueResolutionService.resolve(Constants.TENANT, c.tenant()));
-        resolved.put(Constants.WORKSPACE, cyclesValueResolutionService.resolve(Constants.WORKSPACE, c.workspace()));
-        resolved.put(Constants.APP, cyclesValueResolutionService.resolve(Constants.APP, c.app()));
-        resolved.put(Constants.WORKFLOW, cyclesValueResolutionService.resolve(Constants.WORKFLOW, c.workflow()));
-        resolved.put(Constants.AGENT, cyclesValueResolutionService.resolve(Constants.AGENT, c.agent()));
-        resolved.put(Constants.TOOLSET, cyclesValueResolutionService.resolve(Constants.TOOLSET, c.toolset()));
+        resolved.put(Constants.TENANT, resolveSubjectField(Constants.TENANT, c.tenant(), method, args, target));
+        resolved.put(Constants.WORKSPACE, resolveSubjectField(Constants.WORKSPACE, c.workspace(), method, args, target));
+        resolved.put(Constants.APP, resolveSubjectField(Constants.APP, c.app(), method, args, target));
+        resolved.put(Constants.WORKFLOW, resolveSubjectField(Constants.WORKFLOW, c.workflow(), method, args, target));
+        resolved.put(Constants.AGENT, resolveSubjectField(Constants.AGENT, c.agent(), method, args, target));
+        resolved.put(Constants.TOOLSET, resolveSubjectField(Constants.TOOLSET, c.toolset(), method, args, target));
         return resolved;
+    }
+
+    private String resolveSubjectField(String fieldName, String annotationValue,
+                                       Method method, Object[] args, Object target) {
+        String evaluated = expressionEvaluator.evaluateString(annotationValue, method, args, target);
+        return cyclesValueResolutionService.resolve(fieldName, evaluated);
     }
 
     private Map<String, Object> buildSubject(Map<String, String> resolvedFields, String[] dimensions) {
