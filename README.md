@@ -2,11 +2,11 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)](https://github.com/runcycles/cycles-spring-boot-starter/actions)
 
-# Cycles Spring Boot Starter
+# Cycles Spring Boot Starter — AI agent budget governance for Java/Spring
 
-A Spring Boot starter that integrates with the [Cycles Budget Authority](https://github.com/runcycles/cycles-protocol) — a deterministic spend governance protocol for agent runtimes.
+**Drop-in `@Cycles` annotation that enforces budget and action limits on Spring Boot AI agents and LLM-calling services.** Integrates with the [Cycles Protocol](https://github.com/runcycles/cycles-protocol) for runtime authority over agent spend, risk, and tool actions — multi-tenant, concurrency-safe, and Spring-native.
 
-Cycles enforces budget reservations around guarded method executions using a **reserve / execute / commit** lifecycle. If the budget is exceeded, execution is denied before the guarded code runs.
+Reserve budget around guarded method executions using a **reserve / execute / commit** lifecycle. If the budget is exceeded, execution is denied before the guarded code runs. Compatible with Java 21+ and Spring Boot 3.3+.
 
 ## Quick Start
 
