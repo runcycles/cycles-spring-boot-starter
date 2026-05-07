@@ -256,3 +256,16 @@ Three low-severity gaps identified (response header capture, typed DTO validatio
 - `CyclesRequestBuilderService` gains a context-aware `buildReservation` overload `(Cycles, long, String, String, Map, Method, Object[], Object)` that the AOP path uses. The existing 5-arg overload delegates with `null` invocation context (literal-only), so programmatic callers (`buildDecision`, `buildEvent`) keep their previous semantics.
 - `CyclesAutoConfiguration#cyclesSelfInvocationDetector` is now `static`, eliminating the Spring startup warning *"Bean ... is not eligible for getting processed by all BeanPostProcessors"* and ensuring the configuration class is properly post-processed.
 - New tests: `CyclesExpressionEvaluatorTest.EvaluateString` (literal/null/blank/`#var`/nested/safe-nav/non-String/leading-whitespace) and `CyclesRequestBuilderServiceTest.BuildReservationSpel` (end-to-end resolution of `@Cycles(workspace = "#workspaceId")` with fallback to resolver on null).
+
+---
+
+## 0.2.2 — Maven Central Metadata Refresh (2026-05-07)
+
+**Files:** `cycles-client-java-spring/pom.xml`. **No code changes.** Wire format, public API, Spring AOP integration, and protocol conformance are identical to 0.2.1.
+
+- **`<description>` rewritten** to lead with the cost / action / audit pillars and explicit AI-agent / Spring AI positioning: *"Spring Boot starter for AI agent runtime control with Cycles. Enforce LLM cost limits, tool call caps, action permissions, and audit trails on Spring AI / Spring Boot agents before execution. Reactive WebFlux client with @Cycles annotation, SpEL-based subject routing, and per-tenant budget enforcement."*
+- **`<name>` updated** to *"Cycles Client Java Spring — AI agent runtime control for Spring Boot"*.
+
+Maven Central uses the pom `<description>` as the primary search/snippet field (no keyword field exists in Maven coordinates), so it's the only SEO lever available for the artifact. The previous one-liner *"Spring-based Java client for the Cycles protocol."* offered no category-search surface.
+
+Driven by package-portfolio SEO diagnostic. Companion fixes for other client packages tracked in their respective repos.
