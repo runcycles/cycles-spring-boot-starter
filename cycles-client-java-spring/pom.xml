@@ -7,11 +7,11 @@
 
     <groupId>io.runcycles</groupId>
     <artifactId>cycles-client-java-spring</artifactId>
-    <version>0.2.1</version>
+    <version>0.2.2</version>
     <packaging>jar</packaging>
 
-    <name>Cycles Client Java Spring</name>
-    <description>Spring-based Java client for the Cycles protocol.</description>
+    <name>Cycles Client Java Spring — AI agent runtime control for Spring Boot</name>
+    <description>Spring Boot starter for AI agent runtime control with Cycles. Enforce LLM cost limits, tool call caps, action permissions, and audit trails on Spring AI / Spring Boot agents before execution. Reactive WebFlux client with @Cycles annotation, SpEL-based subject routing, and per-tenant budget enforcement.</description>
     <url>https://github.com/runcycles/cycles-spring-boot-starter</url>
 
     <developers>

@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.2] - 2026-05-07
+
+Maven Central metadata refresh for category-search discovery. **No code changes** — wire format, public API, and Spring AOP integration are identical to 0.2.1.
+
+### Changed
+
+- `pom.xml` (`cycles-client-java-spring`): rewrote `<description>` to lead with the cost / action / audit pillars and explicit AI-agent / Spring AI positioning. New: *"Spring Boot starter for AI agent runtime control with Cycles. Enforce LLM cost limits, tool call caps, action permissions, and audit trails on Spring AI / Spring Boot agents before execution. Reactive WebFlux client with @Cycles annotation, SpEL-based subject routing, and per-tenant budget enforcement."* Updated `<name>` to *"Cycles Client Java Spring — AI agent runtime control for Spring Boot"*.
+
+Maven Central uses the pom `<description>` as the primary search/snippet field (no keyword field exists in Maven coordinates). The previous one-liner *"Spring-based Java client for the Cycles protocol."* offered no category-search surface.
+
 ## [0.2.1] - 2026-04-27
 
 ### Fixed
