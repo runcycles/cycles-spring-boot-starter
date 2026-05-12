@@ -7,7 +7,7 @@
 
     <groupId>io.runcycles</groupId>
     <artifactId>cycles-client-java-spring</artifactId>
-    <version>0.2.2</version>
+    <version>${revision}</version>
     <packaging>jar</packaging>
 
     <name>Cycles Client Java Spring — AI agent runtime control for Spring Boot</name>
@@ -40,6 +40,13 @@
     </scm>
 
     <properties>
+        <!-- Single source of truth for the project version. Drive bumps via
+             .mvn/maven.config at the repo root (one-line edit propagates to both
+             this pom and the demo pom, which also resolves ${revision}). The default
+             value here is only a fallback for IDE imports that don't pick up
+             .mvn/maven.config — the CLI value (or maven.config) always wins. -->
+        <revision>0.2.2</revision>
+
         <java.version>21</java.version>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
@@ -86,6 +93,35 @@
 
     <build>
         <plugins>
+            <!-- Resolve ${revision} in the published pom. Sonatype Central rejects
+                 unresolved placeholders in pom <version> fields, and Maven's default
+                 install/deploy ships the source pom as-is. flatten-maven-plugin in
+                 resolveCiFriendliesOnly mode substitutes ${revision} (and ${sha1} /
+                 ${changelist} if we ever use them) and leaves the rest of the pom
+                 untouched — much safer than the default mode which strips a lot of
+                 build-only sections. -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.7.3</version>
+                <configuration>
+                    <updatePomFile>true</updatePomFile>
+                    <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals><goal>flatten</goal></goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals><goal>clean</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
