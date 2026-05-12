@@ -32,6 +32,34 @@ jobs:
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           gpg-passphrase: GPG_PASSPHRASE
 
+      - name: Verify pom version is not SNAPSHOT
+        working-directory: cycles-client-java-spring
+        # Sonatype Central rejects SNAPSHOT publishes server-side, but we'd rather
+        # fail fast on the runner than wait for the deploy step. Tracked org-wide
+        # at runcycles/.github#61.
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          if [[ "$VERSION" == *SNAPSHOT* ]]; then
+            echo "::error::Cannot publish SNAPSHOT version: $VERSION. Drop -SNAPSHOT in the pom before tagging."
+            exit 1
+          fi
+          echo "pom version: $VERSION"
+
+      - name: Verify pom version matches release tag
+        if: github.event_name == 'release'
+        working-directory: cycles-client-java-spring
+        # Catches the case where someone tags v0.1.1 while the pom still says 0.1.0.
+        # Sonatype would publish the artifact at the pom version, not the tag,
+        # producing a release artifact that doesn't match the git tag.
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          TAG="${GITHUB_REF_NAME#v}"
+          if [[ "$VERSION" != "$TAG" ]]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match pom version ${VERSION}. Bump the pom version to match the tag before re-cutting the release."
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} matches pom version ${VERSION}"
+
       - name: Test release build without publishing
         working-directory: cycles-client-java-spring
         run: mvn -B -Prelease clean verify
@@ -61,6 +89,29 @@ jobs:
           server-password: CENTRAL_PASSWORD
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           gpg-passphrase: GPG_PASSPHRASE
+
+      - name: Verify pom version is not SNAPSHOT
+        working-directory: cycles-client-java-spring
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          if [[ "$VERSION" == *SNAPSHOT* ]]; then
+            echo "::error::Cannot publish SNAPSHOT version: $VERSION. Drop -SNAPSHOT in the pom before tagging."
+            exit 1
+          fi
+          echo "pom version: $VERSION"
+
+      - name: Verify pom version matches release tag
+        working-directory: cycles-client-java-spring
+        # Belt + suspenders: also verify in the publish job in case the upstream
+        # test-release-build check is ever bypassed.
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          TAG="${GITHUB_REF_NAME#v}"
+          if [[ "$VERSION" != "$TAG" ]]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match pom version ${VERSION}."
+            exit 1
+          fi
+          echo "Publishing version: $VERSION (matches tag ${GITHUB_REF_NAME})"
 
       - name: Publish
         working-directory: cycles-client-java-spring
