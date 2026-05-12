@@ -40,7 +40,7 @@ jobs:
         run: |
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           if [[ "$VERSION" == *SNAPSHOT* ]]; then
-            echo "::error::Cannot publish SNAPSHOT version: $VERSION. Drop -SNAPSHOT in the pom before tagging."
+            echo "::error::Cannot publish SNAPSHOT version: $VERSION. Bump .mvn/maven.config (-Drevision=...) to a non-SNAPSHOT release version before creating the GitHub Release."
             exit 1
           fi
           echo "pom version: $VERSION"
@@ -48,17 +48,17 @@ jobs:
       - name: Verify pom version matches release tag
         if: github.event_name == 'release'
         working-directory: cycles-client-java-spring
-        # Catches the case where someone tags v0.1.1 while the pom still says 0.1.0.
-        # Sonatype would publish the artifact at the pom version, not the tag,
-        # producing a release artifact that doesn't match the git tag.
+        # Catches the case where someone tags v0.1.1 while .mvn/maven.config still
+        # holds -Drevision=0.1.0. Sonatype would publish the artifact at the resolved
+        # version, not the tag, producing a release artifact that doesn't match git.
         run: |
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           TAG="${GITHUB_REF_NAME#v}"
           if [[ "$VERSION" != "$TAG" ]]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match pom version ${VERSION}. Bump the pom version to match the tag before re-cutting the release."
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match resolved project version ${VERSION}. Bump .mvn/maven.config (-Drevision=...) to match the tag before re-cutting the release."
             exit 1
           fi
-          echo "Tag ${GITHUB_REF_NAME} matches pom version ${VERSION}"
+          echo "Tag ${GITHUB_REF_NAME} matches resolved project version ${VERSION}"
 
       - name: Test release build without publishing
         working-directory: cycles-client-java-spring
@@ -95,7 +95,7 @@ jobs:
         run: |
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           if [[ "$VERSION" == *SNAPSHOT* ]]; then
-            echo "::error::Cannot publish SNAPSHOT version: $VERSION. Drop -SNAPSHOT in the pom before tagging."
+            echo "::error::Cannot publish SNAPSHOT version: $VERSION. Bump .mvn/maven.config (-Drevision=...) to a non-SNAPSHOT release version before creating the GitHub Release."
             exit 1
           fi
           echo "pom version: $VERSION"
@@ -108,7 +108,7 @@ jobs:
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           TAG="${GITHUB_REF_NAME#v}"
           if [[ "$VERSION" != "$TAG" ]]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match pom version ${VERSION}."
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match resolved project version ${VERSION} (see .mvn/maven.config)."
             exit 1
           fi
           echo "Publishing version: $VERSION (matches tag ${GITHUB_REF_NAME})"
