@@ -1,9 +1,21 @@
 version: 2
 updates:
+  # Maven dependencies — track each module separately since there is no root pom.
   - package-ecosystem: "maven"
-    directory: "/"
+    directories:
+      - "/cycles-client-java-spring"
+      - "/cycles-demo-client-java-spring"
     schedule:
       interval: "weekly"
+    # Stay on the Spring Boot 3.x line per the maintainers policy in
+    # MAINTAINERS.md. Major 4.x bumps require explicit scope review; without
+    # this ignore rule Dependabot re-opens a 4.x PR on every patch release
+    # of Spring Boot 4.
+    ignore:
+      - dependency-name: "org.springframework.boot:*"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actions workflow refs.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
