@@ -7,12 +7,17 @@
 
     <groupId>com.example</groupId>
     <artifactId>cycles-demo-client-java-spring</artifactId>
-    <version>0.2.1</version>
+    <version>${revision}</version>
     <packaging>jar</packaging>
 
     <name>Cycles demo client for JAVA Spring</name>
 
     <properties>
+        <!-- See cycles-client-java-spring/pom.xml for the canonical comment. The demo
+             reads the same ${revision} so its dependency on the starter (below) and
+             its own <version> bump in lockstep with the starter. -->
+        <revision>0.2.2</revision>
+
         <java.version>21</java.version>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
@@ -43,11 +48,14 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
-        <!-- Cycles Starter -->
+        <!-- Cycles Starter — version pinned to ${revision} so a single bump in
+             .mvn/maven.config at the repo root keeps the demo and the starter in
+             lockstep. Pre-refactor this was hand-bumped and drifted (demo dep was
+             at 0.2.1 while the starter shipped 0.2.2). -->
         <dependency>
             <groupId>io.runcycles</groupId>
             <artifactId>cycles-client-java-spring</artifactId>
-            <version>0.2.1</version>
+            <version>${revision}</version>
         </dependency>
 
         <dependency>
@@ -60,6 +68,31 @@
 
     <build>
         <plugins>
+            <!-- See cycles-client-java-spring/pom.xml for why we resolve ${revision}
+                 at install time. The demo doesn't publish, but symmetry keeps the
+                 installed pom's <version> a literal value rather than a placeholder. -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.7.3</version>
+                <configuration>
+                    <updatePomFile>true</updatePomFile>
+                    <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals><goal>flatten</goal></goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals><goal>clean</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

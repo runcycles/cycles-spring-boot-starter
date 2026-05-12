@@ -40,3 +40,8 @@ cycles-client-java-spring/.project
 cycles-demo-client-java-spring/.classpath
 cycles-demo-client-java-spring/.project
 cycles-client-java-spring/.classpath
+
+# flatten-maven-plugin output (resolved-CI-friendly pom written at process-resources;
+# Maven installs/deploys this instead of the source pom so published artifacts have a
+# literal <version> rather than ${revision}). Build artifact — never committed.
+/**/.flattened-pom.xml
