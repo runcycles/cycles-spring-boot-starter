@@ -269,3 +269,20 @@ Three low-severity gaps identified (response header capture, typed DTO validatio
 Maven Central uses the pom `<description>` as the primary search/snippet field (no keyword field exists in Maven coordinates), so it's the only SEO lever available for the artifact. The previous one-liner *"Spring-based Java client for the Cycles protocol."* offered no category-search surface.
 
 Driven by package-portfolio SEO diagnostic. Companion fixes for other client packages tracked in their respective repos.
+
+---
+
+## CI: SNAPSHOT-version guard on publish.yaml (2026-05-12)
+
+**Files:** `.github/workflows/publish.yaml`. **No code changes.** Wire format, public API, and protocol conformance unchanged.
+
+Closes `runcycles/.github#61` for this repo. Mirrors the same fix already present in `cycles-spring-ai-starter/.github/workflows/publish.yaml`.
+
+Added two guard steps to both jobs (`test-release-build` and `publish`):
+
+1. **Verify pom version is not SNAPSHOT.** Reads the resolved project version via `mvn help:evaluate -Dexpression=project.version` and fails the workflow if it ends in `-SNAPSHOT`. Sonatype Central rejects SNAPSHOT publishes server-side, but a runner-side fail surfaces the operator error before the deploy phase.
+2. **Verify pom version matches release tag.** Catches the case where someone cuts a release tagged `v0.2.3` while the pom is still on `0.2.2`. Without this check, Maven would publish at the pom version, producing a Central artifact whose Maven coordinate doesn't match the git tag — recoverable but confusing.
+
+The guards run before the build/deploy steps so they fail fast. Workflow shape is otherwise unchanged.
+
+Protocol conformance: No protocol or wire-format changes. CI-only update.
