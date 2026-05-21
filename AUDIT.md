@@ -1,7 +1,8 @@
-# Cycles Protocol v0.1.23 — Client (Spring Boot Starter) Audit
+# Cycles Protocol v0.1.25 — Client (Spring Boot Starter) Audit
 
-**Date:** 2026-03-08
-**Spec:** `cycles-protocol-v0.yaml` (OpenAPI 3.1.0, v0.1.23)
+**Date:** 2026-05-21 (v0.2.3 — `from` / `to` ISO-8601 window-filter passthrough on `listReservations` per `cycles-protocol-v0.yaml` revision 2026-05-21; closes the Spring Boot starter side of runcycles/cycles-server#159. No code change — `Map<String, String>` already forwards arbitrary keys; added a regression test on `DefaultCyclesClient` that pins the passthrough. Spring's `WebClient` leaves colons unencoded in the query component (RFC 3986 §3.4-valid), so the wire form is `from=2026-05-21T00:00:00Z`. 433 tests pass; JaCoCo coverage gate met. Version bumped via the single `.mvn/maven.config` source of truth.),
+2026-03-08
+**Spec:** `cycles-protocol-v0.yaml` (OpenAPI 3.1.0, v0.1.25)
 **Client:** `cycles-client-java-spring` (Spring Boot 3.3.5 / Java 21 / WebClient)
 **Server audit:** See `cycles-server/AUDIT.md` (all passing)
 
