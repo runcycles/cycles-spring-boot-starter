@@ -11,6 +11,21 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 - Adopt Maven [CI-friendly versions](https://maven.apache.org/maven-ci-friendly.html). Both poms (`cycles-client-java-spring` and `cycles-demo-client-java-spring`) now declare `<version>${revision}</version>`, and the demo's dependency on the starter uses `<version>${revision}</version>` as well. The single source of truth lives at `.mvn/maven.config` at the repo root (currently `-Drevision=0.2.3`). Cutting a release becomes a one-line edit. Also fixes a drift bug: pre-refactor the demo's pom was at version `0.2.1` and its dep on the starter pinned `0.2.1` while the starter shipped `0.2.2` — they could never have been bumped together without two manual edits.
 - `flatten-maven-plugin` (`resolveCiFriendliesOnly` mode) wired on both poms so install/deploy emit a `.flattened-pom.xml` with `${revision}` substituted to a literal version. Sonatype Central requires a literal in the published `<version>` field; non-CI-friendly properties like `${spring.boot.version}` remain unresolved in the published pom and interpolate against the pom's own `<properties>` block at consumer-resolve time (standard Maven behavior, unchanged).
 
+## [0.2.4] - 2026-05-22
+
+Wire-passthrough verification for `expires_from`/`expires_to` and `finalized_from`/`finalized_to` query params on `listReservations`. Implements `cycles-protocol-v0.yaml` revision 2026-05-22 ([runcycles/cycles-protocol#98](https://github.com/runcycles/cycles-protocol/pull/98)) on the client side; runcycles/cycles-server#163 ships the server impl. Closes the Spring Boot starter side of runcycles/cycles-server#162.
+
+### Added
+
+- Regression test on `DefaultCyclesClient.listReservations` confirming the four new ISO-8601 window params land on the wire under their spec-mandated names. The existing `Map<String, String>` signature already accepted them — the test pins the contract.
+
+### Notes
+
+- Spring's `WebClient` leaves colons unencoded in the query component (RFC 3986 §3.4-valid), so the wire form is `expires_from=2026-05-22T00:00:00Z` rather than the percent-escaped variant. Same behavior as v0.2.3.
+- No protocol or wire-format change. Servers older than v0.1.25.21 silently ignore the new params per the additive-parameter guarantee in `cycles-protocol-v0.yaml`.
+- 434 tests pass; JaCoCo coverage gate met (≥95% per `CLAUDE.md`).
+- Version bumped on both `cycles-client-java-spring` and `cycles-demo-client-java-spring` poms via the single `.mvn/maven.config` source of truth.
+
 ## [0.2.3] - 2026-05-21
 
 Wire-passthrough verification for the new `from` / `to` query params on `listReservations`. Implements `cycles-protocol-v0.yaml` revision 2026-05-21 ([runcycles/cycles-protocol#97](https://github.com/runcycles/cycles-protocol/pull/97)) on the client side; runcycles/cycles-server#160 ships the server impl. Closes the Spring Boot starter side of runcycles/cycles-server#159.
