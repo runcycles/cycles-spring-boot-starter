@@ -45,7 +45,7 @@
              this pom and the demo pom, which also resolves ${revision}). The default
              value here is only a fallback for IDE imports that don't pick up
              .mvn/maven.config — the CLI value (or maven.config) always wins. -->
-        <revision>0.2.3</revision>
+        <revision>0.2.4</revision>
 
         <java.version>21</java.version>
         <maven.compiler.source>21</maven.compiler.source>

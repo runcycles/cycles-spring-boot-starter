@@ -268,6 +268,32 @@ class DefaultCyclesClientTest {
             assertThat(path).contains("from=2026-05-21T00:00:00Z");
             assertThat(path).contains("to=2026-05-22T00:00:00Z");
         }
+
+        // cycles-protocol-v0.yaml revision 2026-05-22 — expires_*/finalized_*
+        // ISO-8601 window-filter passthrough. Same shape as from/to; Spring's
+        // WebClient leaves colons unencoded (RFC 3986 §3.4 permits `:` in the
+        // query component).
+        @Test
+        void shouldForwardExpiresAndFinalizedWindows() throws Exception {
+            enqueueJson(200, Map.of("reservations", java.util.List.of()));
+
+            client.listReservations(Map.of(
+                "tenant", "acme",
+                "expires_from", "2026-05-22T00:00:00Z",
+                "expires_to", "2026-05-23T00:00:00Z",
+                "finalized_from", "2026-05-15T00:00:00Z",
+                "finalized_to", "2026-05-22T00:00:00Z"
+            ));
+
+            RecordedRequest req = server.takeRequest();
+            assertThat(req.getMethod()).isEqualTo("GET");
+            String path = req.getPath();
+            assertThat(path).contains("tenant=acme");
+            assertThat(path).contains("expires_from=2026-05-22T00:00:00Z");
+            assertThat(path).contains("expires_to=2026-05-23T00:00:00Z");
+            assertThat(path).contains("finalized_from=2026-05-15T00:00:00Z");
+            assertThat(path).contains("finalized_to=2026-05-22T00:00:00Z");
+        }
     }
 
     @Nested
