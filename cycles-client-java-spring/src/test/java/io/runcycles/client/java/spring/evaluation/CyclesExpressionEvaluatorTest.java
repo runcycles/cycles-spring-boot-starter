@@ -24,10 +24,20 @@ class CyclesExpressionEvaluatorTest {
     // Target class with methods for SpEL evaluation
     public static class SampleService {
         private final String tenantType = "enterprise";
-        public String process(int tokens, String model) { return "done"; }
+        public String process(int tokens, String model) {
+            observeFixtureParameters(tokens, model);
+            return "done";
+        }
         public int compute(int a, int b) { return a + b; }
-        public String workspaced(String workspaceId, Request req) { return "ok"; }
+        public String workspaced(String workspaceId, Request req) {
+            observeFixtureParameters(workspaceId, req);
+            return "ok";
+        }
         public String getTenantType() { return tenantType; }
+    }
+
+    private static void observeFixtureParameters(Object... values) {
+        assertThat(values).isNotNull();
     }
 
     public static class Request {
@@ -351,6 +361,20 @@ class CyclesExpressionEvaluatorTest {
             assertThat(result).containsEntry("arg0", 100);
             assertThat(result).containsEntry("result_len", 5);
             assertThat(result).containsEntry("root_result_len", 5);
+        }
+
+        @Test
+        void shouldResolveMetadataMapFromNamedWorkspaceParameters() throws Exception {
+            Map<String, Object> result = evaluator.evaluateMap(
+                    "{ 'workspace_id': #workspaceId, 'request_workspace_id': #req?.workspaceId, 'result': #result }",
+                    workspacedMethod(),
+                    new Object[]{"ws-42", new Request("ws-99")},
+                    "ok",
+                    new SampleService());
+
+            assertThat(result).containsEntry("workspace_id", "ws-42");
+            assertThat(result).containsEntry("request_workspace_id", "ws-99");
+            assertThat(result).containsEntry("result", "ok");
         }
 
         @Test
