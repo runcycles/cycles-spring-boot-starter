@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-06-18
+
 ### Added
 
 - Add declarative commit metadata binding via `@Cycles(metadata = "...")`. The SpEL expression is evaluated at commit time against the guarded method invocation, must produce a `Map<String,Object>`, and is merged with `CyclesContextHolder` commit metadata, with programmatic metadata taking precedence on duplicate keys. Implements [#88](https://github.com/runcycles/cycles-spring-boot-starter/issues/88).
