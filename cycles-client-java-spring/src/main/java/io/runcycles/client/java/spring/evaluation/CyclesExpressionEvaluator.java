@@ -201,18 +201,38 @@ public class CyclesExpressionEvaluator {
             this.method = method;
         }
 
+        /**
+         * Returns the bean instance on which the annotated method was invoked.
+         *
+         * @return the target bean instance
+         */
         public Object getTarget() {
             return target;
         }
 
+        /**
+         * Returns the annotated method invocation arguments.
+         *
+         * @return the method invocation arguments
+         */
         public Object[] getArgs() {
             return args;
         }
 
+        /**
+         * Returns the annotated method return value.
+         *
+         * @return the method return value
+         */
         public Object getResult() {
             return result;
         }
 
+        /**
+         * Returns the annotated method.
+         *
+         * @return the annotated method
+         */
         public Method getMethod() {
             return method;
         }
