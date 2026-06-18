@@ -130,6 +130,17 @@ public @interface Cycles {
     String actual() default "";
 
     /**
+     * SpEL expression for commit metadata (evaluated after method returns).
+     *
+     * <p>The expression must evaluate to a {@code Map<String, Object>}. It is
+     * merged into commit metadata collected from {@link io.runcycles.client.java.spring.context.CyclesContextHolder};
+     * programmatic metadata wins on key conflicts.
+     *
+     * @return the commit metadata SpEL expression, or empty string if unset
+     */
+    String metadata() default "";
+
+    /**
      * When true and {@code actual} is blank, use the estimate as actual.
      * Defaults to true so that the minimal {@code @Cycles("1000")} works.
      *

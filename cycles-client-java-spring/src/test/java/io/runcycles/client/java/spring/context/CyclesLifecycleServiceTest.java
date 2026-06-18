@@ -72,6 +72,7 @@ class CyclesLifecycleServiceTest {
         when(cycles.value()).thenReturn("1000");
         when(cycles.estimate()).thenReturn("");
         when(cycles.actual()).thenReturn("");
+        when(cycles.metadata()).thenReturn("");
         when(cycles.useEstimateIfActualNotProvided()).thenReturn(true);
         when(cycles.unit()).thenReturn("TOKENS");
         when(cycles.ttlMs()).thenReturn(60000L);
@@ -227,6 +228,83 @@ class CyclesLifecycleServiceTest {
             );
 
             verify(requestBuilderService).buildCommit(eq(cycles), eq(5L), any(), any());
+        }
+
+        @Test
+        void shouldMergeAnnotationMetadataWithContextMetadata() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            String metadataExpression = "{ 'request_id': #args[0], 'source': 'annotation' }";
+            when(cycles.metadata()).thenReturn(metadataExpression);
+
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+            Map<String, Object> annotationMetadata = Map.of(
+                    "request_id", "req-123",
+                    "source", "annotation");
+            Map<String, Object> expectedMetadata = Map.of(
+                    "request_id", "req-123",
+                    "source", "context",
+                    "user", "alice");
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(evaluator.evaluateMap(eq(metadataExpression), eq(method), eq(args), eq("hello"), eq(target)))
+                    .thenReturn(annotationMetadata);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-meta")));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(anyString(), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+
+            service.executeWithReservation(
+                    () -> {
+                        CyclesContextHolder.get().setCommitMetadata(Map.of(
+                                "source", "context",
+                                "user", "alice"));
+                        return "hello";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(requestBuilderService).buildCommit(
+                    eq(cycles), eq(1000L), any(CyclesMetrics.class), eq(expectedMetadata));
+        }
+
+        @Test
+        void shouldSkipAnnotationMetadataWhenEvaluationFails() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            String metadataExpression = "{ 'request_id': #missing.value }";
+            when(cycles.metadata()).thenReturn(metadataExpression);
+
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(evaluator.evaluateMap(eq(metadataExpression), eq(method), eq(args), eq("hello"), eq(target)))
+                    .thenThrow(new IllegalArgumentException("bad metadata"));
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-meta-fail")));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(anyString(), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+
+            Object result = service.executeWithReservation(
+                    () -> "hello",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            assertThat(result).isEqualTo("hello");
+            verify(requestBuilderService).buildCommit(
+                    eq(cycles), eq(1000L), any(CyclesMetrics.class), isNull());
         }
     }
 

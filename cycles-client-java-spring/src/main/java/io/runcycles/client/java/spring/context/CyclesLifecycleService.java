@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
@@ -199,8 +200,10 @@ public class CyclesLifecycleService {
                 metrics.setLatencyMs((int) methodElapsed);
             }
 
+            Map<String, Object> commitMetadata = resolveCommitMetadata(
+                    cycles, method, args, result, target, ctx.getCommitMetadata());
             Map<String, Object> commitBody = requestBuilderService.buildCommit(
-                    cycles, actualAmount, metrics, ctx.getCommitMetadata());
+                    cycles, actualAmount, metrics, commitMetadata);
 
             handleCommit(reservationId, commitBody);
 
@@ -331,6 +334,48 @@ public class CyclesLifecycleService {
         } else {
             LOG.error("Actual usage amount is missing that is required");
             throw new IllegalStateException("Actual expression required");
+        }
+    }
+
+    private Map<String, Object> resolveCommitMetadata(Cycles cycles,
+                                                       Method method,
+                                                       Object[] args,
+                                                       Object result,
+                                                       Object target,
+                                                       Map<String, Object> contextMetadata) {
+        Map<String, Object> annotationMetadata = evaluateAnnotationCommitMetadata(
+                cycles, method, args, result, target);
+
+        boolean hasAnnotationMetadata = annotationMetadata != null && !annotationMetadata.isEmpty();
+        boolean hasContextMetadata = contextMetadata != null && !contextMetadata.isEmpty();
+
+        if (!hasAnnotationMetadata) {
+            return contextMetadata;
+        }
+        if (!hasContextMetadata) {
+            return annotationMetadata;
+        }
+
+        Map<String, Object> merged = new LinkedHashMap<>(annotationMetadata);
+        merged.putAll(contextMetadata);
+        return merged;
+    }
+
+    private Map<String, Object> evaluateAnnotationCommitMetadata(Cycles cycles,
+                                                                  Method method,
+                                                                  Object[] args,
+                                                                  Object result,
+                                                                  Object target) {
+        String metadataExpression = cycles.metadata();
+        if (metadataExpression == null || metadataExpression.isBlank()) {
+            return null;
+        }
+        try {
+            return evaluator.evaluateMap(metadataExpression, method, args, result, target);
+        } catch (Exception e) {
+            LOG.warn("Skipping @Cycles commit metadata after SpEL evaluation failure: method={}, expression={}",
+                    method, metadataExpression, e);
+            return null;
         }
     }
 
