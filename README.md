@@ -16,7 +16,7 @@ Reserve budget around guarded method executions using a **reserve / execute / co
 <dependency>
     <groupId>io.runcycles</groupId>
     <artifactId>cycles-client-java-spring</artifactId>
-    <version>0.2.1</version>
+    <version>0.2.5</version>
 </dependency>
 ```
 
