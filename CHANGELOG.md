@@ -6,9 +6,13 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+### Added
+
+- Add declarative commit metadata binding via `@Cycles(metadata = "...")`. The SpEL expression is evaluated at commit time against the guarded method invocation, must produce a `Map<String,Object>`, and is merged with `CyclesContextHolder` commit metadata, with programmatic metadata taking precedence on duplicate keys. Implements [#88](https://github.com/runcycles/cycles-spring-boot-starter/issues/88).
+
 ### Build
 
-- Adopt Maven [CI-friendly versions](https://maven.apache.org/maven-ci-friendly.html). Both poms (`cycles-client-java-spring` and `cycles-demo-client-java-spring`) now declare `<version>${revision}</version>`, and the demo's dependency on the starter uses `<version>${revision}</version>` as well. The single source of truth lives at `.mvn/maven.config` at the repo root (currently `-Drevision=0.2.3`). Cutting a release becomes a one-line edit. Also fixes a drift bug: pre-refactor the demo's pom was at version `0.2.1` and its dep on the starter pinned `0.2.1` while the starter shipped `0.2.2` — they could never have been bumped together without two manual edits.
+- Adopt Maven [CI-friendly versions](https://maven.apache.org/maven-ci-friendly.html). Both poms (`cycles-client-java-spring` and `cycles-demo-client-java-spring`) now declare `<version>${revision}</version>`, and the demo's dependency on the starter uses `<version>${revision}</version>` as well. The single source of truth lives at `.mvn/maven.config` at the repo root (currently `-Drevision=0.2.5`). Cutting a release becomes a one-line edit. Also fixes a drift bug: pre-refactor the demo's pom was at version `0.2.1` and its dep on the starter pinned `0.2.1` while the starter shipped `0.2.2` — they could never have been bumped together without two manual edits.
 - `flatten-maven-plugin` (`resolveCiFriendliesOnly` mode) wired on both poms so install/deploy emit a `.flattened-pom.xml` with `${revision}` substituted to a literal version. Sonatype Central requires a literal in the published `<version>` field; non-CI-friendly properties like `${spring.boot.version}` remain unresolved in the published pom and interpolate against the pom's own `<properties>` block at consumer-resolve time (standard Maven behavior, unchanged).
 
 ## [0.2.4] - 2026-05-22

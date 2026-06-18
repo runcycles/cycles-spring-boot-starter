@@ -16,7 +16,7 @@ Reserve budget around guarded method executions using a **reserve / execute / co
 <dependency>
     <groupId>io.runcycles</groupId>
     <artifactId>cycles-client-java-spring</artifactId>
-    <version>0.2.1</version>
+    <version>0.2.5</version>
 </dependency>
 ```
 
@@ -170,6 +170,7 @@ cycles:
 | `actionKind` | No | class name | Action category (e.g., `llm.completion`, `tool.search`) |
 | `actionName` | No | method name | Action identifier (e.g., `gpt-4`, `web.search`) |
 | `actual` | No | `""` | SpEL expression for actual cost (evaluated after method returns) |
+| `metadata` | No | `""` | SpEL expression for commit metadata, evaluated after method returns. Must produce a `Map<String,Object>` |
 | `actionTags` | No | `{}` | Policy tags (e.g., `{"prod", "customer-facing"}`) |
 | `useEstimateIfActualNotProvided` | No | `true` | Use estimate as actual when `actual` is blank |
 | `unit` | No | `USD_MICROCENTS` | Cost unit: `USD_MICROCENTS`, `TOKENS`, `CREDITS`, `RISK_POINTS` |
@@ -212,15 +213,16 @@ public String productionBilling(int amount) { ... }
 
 ### SpEL Expressions
 
-Estimate and actual expressions are evaluated as SpEL with these variables available:
+Estimate, actual, and metadata expressions are evaluated as SpEL with these variables available:
 
 | Variable | Description |
 |---|---|
 | `#p0`, `#p1`, ... | Method parameters by index |
 | `#paramName` | Method parameters by name (requires `-parameters` compiler flag) |
-| `#result` | Method return value (only available in `actual`) |
+| `#result` | Method return value (available in `actual` and `metadata`) |
 | `#args` | All method arguments as an array |
 | `#target` | The target object (the bean instance) |
+| `#root.target`, `#root.args`, `#root.result` | Root invocation object available to metadata expressions |
 
 Examples:
 ```java
@@ -433,6 +435,25 @@ public String generate(String prompt, int tokens) {
 ## Metadata on Commit
 
 Attach arbitrary key-value metadata to the commit request for audit/debugging:
+
+```java
+@Cycles(value = "#audio.seconds",
+        actionKind = "voice.transcribe",
+        actionName = "audioToText",
+        metadata = "{ 'request_id': #requestId, 'tenant_type': #root.target.tenantType }")
+public Transcript processAudio(Audio audio, String requestId) {
+    return transcribe(audio);
+}
+```
+
+The `metadata` expression is evaluated after the guarded method returns, so it can
+use method arguments, `#target`, `#root.target`, `#root.args`, and `#result`.
+Evaluation failures are logged and skipped so metadata binding never breaks the
+guarded call. The expression must evaluate to a `Map<String,Object>`.
+
+You can still add or override metadata imperatively. If both annotation metadata
+and `CyclesContextHolder` metadata contain the same key, the programmatic value
+wins:
 
 ```java
 @Cycles(...)

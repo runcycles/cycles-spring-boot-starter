@@ -9,6 +9,8 @@ import org.springframework.expression.*;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 
 import java.lang.reflect.Method;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -127,5 +129,92 @@ public class CyclesExpressionEvaluator {
         ctx.setVariable("target", target);
         Object result = exp.getValue(ctx);
         return result == null ? null : result.toString();
+    }
+
+    /**
+     * Evaluates a SpEL expression to commit metadata.
+     *
+     * <p>The expression must evaluate to a {@code Map} with {@code String} keys.
+     * The evaluation context exposes named method parameters, {@code #args},
+     * {@code #target}, {@code #result}, and a root object with {@code target},
+     * {@code args}, {@code result}, and {@code method} properties.
+     *
+     * @param expression the SpEL expression string
+     * @param method     the annotated method
+     * @param args       the method invocation arguments
+     * @param result     the method return value
+     * @param target     the bean instance on which the method was invoked
+     * @return the evaluated metadata map, or an empty map when the expression evaluates to {@code null}
+     * @throws IllegalArgumentException if the expression does not evaluate to a map with string keys
+     */
+    public Map<String, Object> evaluateMap(String expression,
+                                           Method method,
+                                           Object[] args,
+                                           Object result,
+                                           Object target) {
+        if (expression == null || expression.isBlank()) {
+            return Map.of();
+        }
+        if (method == null) {
+            throw new IllegalArgumentException("Method is required for metadata expression evaluation");
+        }
+
+        Expression exp = parseCached(expression);
+        MethodInvocationRoot root = new MethodInvocationRoot(target, args, result, method);
+        MethodBasedEvaluationContext ctx = new MethodBasedEvaluationContext(root, method, args, discoverer);
+        ctx.setVariable("args", args);
+        ctx.setVariable("target", target);
+        ctx.setVariable("result", result);
+        ctx.setVariable("method", method);
+
+        Object value = exp.getValue(ctx);
+        if (value == null) {
+            return Map.of();
+        }
+        if (!(value instanceof Map<?, ?> rawMap)) {
+            throw new IllegalArgumentException("Metadata expression must evaluate to Map<String, Object>: " + expression);
+        }
+
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
+            if (!(entry.getKey() instanceof String key)) {
+                throw new IllegalArgumentException("Metadata expression produced a non-string key: " + entry.getKey());
+            }
+            metadata.put(key, entry.getValue());
+        }
+        return metadata;
+    }
+
+    /**
+     * Root object for method-invocation metadata expressions.
+     */
+    public static final class MethodInvocationRoot {
+        private final Object target;
+        private final Object[] args;
+        private final Object result;
+        private final Method method;
+
+        MethodInvocationRoot(Object target, Object[] args, Object result, Method method) {
+            this.target = target;
+            this.args = args;
+            this.result = result;
+            this.method = method;
+        }
+
+        public Object getTarget() {
+            return target;
+        }
+
+        public Object[] getArgs() {
+            return args;
+        }
+
+        public Object getResult() {
+            return result;
+        }
+
+        public Method getMethod() {
+            return method;
+        }
     }
 }

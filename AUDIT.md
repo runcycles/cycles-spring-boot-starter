@@ -1,10 +1,11 @@
 # Cycles Protocol v0.1.25 — Client (Spring Boot Starter) Audit
 
-**Date:** 2026-05-22 (v0.2.4 — `expires_from`/`expires_to` and `finalized_from`/`finalized_to` ISO-8601 window-filter passthrough on `listReservations` per `cycles-protocol-v0.yaml` revision 2026-05-22; closes the Spring Boot starter side of runcycles/cycles-server#162. No code change — `Map<String, String>` already forwards arbitrary keys; added a regression test on `DefaultCyclesClient` that pins all four new params on the wire. Spring's `WebClient` leaves colons unencoded (same as v0.2.3). 434 tests pass; JaCoCo gate met.),
+**Date:** 2026-06-18 (v0.2.5 — adds declarative commit metadata binding via `@Cycles(metadata = "...")`; metadata SpEL is evaluated at commit time against the method invocation, merged with `CyclesContextHolder` commit metadata, and skipped non-fatally on evaluation failure. Version bumped via the single `.mvn/maven.config` source of truth.),
+2026-05-22 (v0.2.4 — `expires_from`/`expires_to` and `finalized_from`/`finalized_to` ISO-8601 window-filter passthrough on `listReservations` per `cycles-protocol-v0.yaml` revision 2026-05-22; closes the Spring Boot starter side of runcycles/cycles-server#162. No code change — `Map<String, String>` already forwards arbitrary keys; added a regression test on `DefaultCyclesClient` that pins all four new params on the wire. Spring's `WebClient` leaves colons unencoded (same as v0.2.3). 434 tests pass; JaCoCo gate met.),
 2026-05-21 (v0.2.3 — `from` / `to` ISO-8601 window-filter passthrough on `listReservations` per `cycles-protocol-v0.yaml` revision 2026-05-21; closes the Spring Boot starter side of runcycles/cycles-server#159. No code change — `Map<String, String>` already forwards arbitrary keys; added a regression test on `DefaultCyclesClient` that pins the passthrough. Spring's `WebClient` leaves colons unencoded in the query component (RFC 3986 §3.4-valid), so the wire form is `from=2026-05-21T00:00:00Z`. 433 tests pass; JaCoCo coverage gate met. Version bumped via the single `.mvn/maven.config` source of truth.),
 2026-03-08
 **Spec:** `cycles-protocol-v0.yaml` (OpenAPI 3.1.0, v0.1.25)
-**Client:** `cycles-client-java-spring` (Spring Boot 3.3.5 / Java 21 / WebClient)
+**Client:** `cycles-client-java-spring` (Spring Boot 3.5.15 / Java 21 / WebClient)
 **Server audit:** See `cycles-server/AUDIT.md` (all passing)
 
 ---
@@ -148,6 +149,7 @@ Note: Client `ErrorCode` adds `UNKNOWN` as a fallback for unrecognized server er
 - Reserve → Execute → Commit flow with proper cleanup (release on failure)
 - Heartbeat-based TTL extension using `extend` endpoint
 - Commit retry engine for transient failures (transport errors, 5xx)
+- Declarative `@Cycles(metadata = "...")` commit metadata binding evaluates at commit time, merges with `CyclesContextHolder` metadata, and skips evaluation failures without failing the guarded call
 - Dry-run handling returns `DryRunResult` without requiring commit/release
 - `DENY` decision correctly raises `CyclesProtocolException`
 - `ALLOW_WITH_CAPS` correctly propagates `Caps` via `CyclesReservationContext`
