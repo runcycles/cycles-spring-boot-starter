@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 
 ## [Unreleased]
 
+### Added
+
+- Add two additive `ErrorCode` enum constants to `cycles-client-java-spring`: `LIMIT_EXCEEDED` (HTTP 429 server-side throttling with `Retry-After`, added to the runtime `ErrorCode` enum in `cycles-protocol-v0.yaml` revision v0.1.25.12) and `TENANT_CLOSED` (HTTP 409 permanent denial when the owning tenant is CLOSED — also surfaced as `reason_code` on dry-run/decide DENYs — added in revision v0.1.25.13). Enum order mirrors the spec: `… MAX_EXTENSIONS_EXCEEDED, LIMIT_EXCEEDED, TENANT_CLOSED, INTERNAL_ERROR`.
+
+### Fixed
+
+- Retry semantics for `TENANT_CLOSED`: `ErrorCode.isRetryable()` now classifies `LIMIT_EXCEEDED` as retryable (transient 429 throttling) and `TENANT_CLOSED` as non-retryable (permanent 409). Previously both codes were unrecognized and fell through to `UNKNOWN`, which `isRetryable()` treats as retryable — so `TENANT_CLOSED` was incorrectly retryable. This corrects that classification. `LIMIT_EXCEEDED` retains the retryable default, so its behavior is unchanged (ergonomics/typing only).
+
 ## [0.2.5] - 2026-06-18
 
 ### Added

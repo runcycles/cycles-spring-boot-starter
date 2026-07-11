@@ -35,6 +35,16 @@ public enum ErrorCode {
     DEBT_OUTSTANDING,
     /** The reservation has been extended the maximum number of times allowed. */
     MAX_EXTENSIONS_EXCEEDED,
+    /**
+     * Server-side throttling / rate limiting (HTTP 429). Carries {@code Retry-After};
+     * a transient condition for which a retry may succeed.
+     */
+    LIMIT_EXCEEDED,
+    /**
+     * The owning tenant is CLOSED (HTTP 409); a permanent, terminal denial that no
+     * retry can resolve.
+     */
+    TENANT_CLOSED,
     /** A transient server-side error occurred (retryable). */
     INTERNAL_ERROR,
     /** An error code not recognized by this client version. */
@@ -61,9 +71,10 @@ public enum ErrorCode {
      * Indicates whether this error code represents a transient condition for which
      * a retry may succeed.
      *
-     * @return {@code true} for {@link #INTERNAL_ERROR} and {@link #UNKNOWN}; {@code false} otherwise
+     * @return {@code true} for {@link #INTERNAL_ERROR}, {@link #LIMIT_EXCEEDED} (HTTP 429
+     *         throttling), and {@link #UNKNOWN}; {@code false} otherwise
      */
     public boolean isRetryable() {
-        return this == INTERNAL_ERROR || this == UNKNOWN;
+        return this == INTERNAL_ERROR || this == LIMIT_EXCEEDED || this == UNKNOWN;
     }
 }
