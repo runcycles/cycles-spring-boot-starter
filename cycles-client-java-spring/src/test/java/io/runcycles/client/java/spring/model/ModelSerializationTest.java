@@ -575,6 +575,8 @@ class ModelSerializationTest {
         void errorCodeFromString() {
             assertThat(ErrorCode.fromString("BUDGET_EXCEEDED")).isEqualTo(ErrorCode.BUDGET_EXCEEDED);
             assertThat(ErrorCode.fromString("OVERDRAFT_LIMIT_EXCEEDED")).isEqualTo(ErrorCode.OVERDRAFT_LIMIT_EXCEEDED);
+            assertThat(ErrorCode.fromString("LIMIT_EXCEEDED")).isEqualTo(ErrorCode.LIMIT_EXCEEDED);
+            assertThat(ErrorCode.fromString("TENANT_CLOSED")).isEqualTo(ErrorCode.TENANT_CLOSED);
             assertThat(ErrorCode.fromString("UNKNOWN_FUTURE")).isEqualTo(ErrorCode.UNKNOWN);
         }
 
@@ -644,6 +646,10 @@ class ModelSerializationTest {
         void errorCodeIsRetryable() {
             assertThat(ErrorCode.INTERNAL_ERROR.isRetryable()).isTrue();
             assertThat(ErrorCode.UNKNOWN.isRetryable()).isTrue();
+            // LIMIT_EXCEEDED is HTTP 429 throttling (Retry-After) — transient, retryable.
+            assertThat(ErrorCode.LIMIT_EXCEEDED.isRetryable()).isTrue();
+            // TENANT_CLOSED is a permanent terminal denial (HTTP 409) — not retryable.
+            assertThat(ErrorCode.TENANT_CLOSED.isRetryable()).isFalse();
             assertThat(ErrorCode.BUDGET_EXCEEDED.isRetryable()).isFalse();
             assertThat(ErrorCode.INVALID_REQUEST.isRetryable()).isFalse();
         }
