@@ -7,7 +7,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -20,13 +22,20 @@ import static org.mockito.Mockito.*;
 @DisplayName("InMemoryCommitRetryEngine")
 class InMemoryCommitRetryEngineTest {
 
+    @TempDir
+    Path journalDir;
+
     private CyclesClient client;
     private CyclesProperties properties;
 
     @BeforeEach
     void setUp() {
+        JournaledCommitRetryEngine.resetReplayClaimsForTesting();
         client = mock(CyclesClient.class);
         properties = new CyclesProperties();
+        // The in-memory engine forces the journal off; pointing the dir at a
+        // @TempDir guards against ever touching the real user.home regardless.
+        properties.getJournal().setDir(journalDir.toString());
         // Use short delays for tests
         CyclesProperties.Retry retry = properties.getRetry();
         retry.setEnabled(true);

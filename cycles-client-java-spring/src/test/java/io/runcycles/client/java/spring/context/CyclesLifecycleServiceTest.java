@@ -552,7 +552,7 @@ class CyclesLifecycleServiceTest {
                     "llm", "complete"
             );
 
-            verify(retryEngine).schedule(eq("res-retry"), eq(commitBody));
+            verify(retryEngine).schedule(eq("res-retry"), eq(commitBody), anyMap(), isNull());
         }
 
         @Test
@@ -580,7 +580,7 @@ class CyclesLifecycleServiceTest {
                     "llm", "complete"
             );
 
-            verify(retryEngine).schedule(eq("res-5xx"), eq(commitBody));
+            verify(retryEngine).schedule(eq("res-5xx"), eq(commitBody), anyMap(), isNull());
         }
 
         @Test
@@ -609,7 +609,8 @@ class CyclesLifecycleServiceTest {
 
             // Should NOT release or retry
             verify(client, never()).releaseReservation(anyString(), any(Object.class));
-            verify(retryEngine, never()).schedule(anyString(), any());
+            verify(retryEngine, never()).schedule(anyString(), any(), any(), any());
+            verify(retryEngine, never()).scheduleEvent(anyString(), any());
         }
 
         @Test
@@ -638,7 +639,8 @@ class CyclesLifecycleServiceTest {
 
             // Should NOT release or retry — reservation state is uncertain
             verify(client, never()).releaseReservation(anyString(), any(Object.class));
-            verify(retryEngine, never()).schedule(anyString(), any());
+            verify(retryEngine, never()).schedule(anyString(), any(), any(), any());
+            verify(retryEngine, never()).scheduleEvent(anyString(), any());
         }
 
         @Test
@@ -696,7 +698,189 @@ class CyclesLifecycleServiceTest {
                     "llm", "complete"
             );
 
-            verify(retryEngine).schedule(eq("res-exc"), eq(commitBody));
+            verify(retryEngine).schedule(eq("res-exc"), eq(commitBody), anyMap(), isNull());
+        }
+
+        @Test
+        void shouldScheduleWithRetryAfterAndNotReleaseOn429() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-429")));
+            Map<String, Object> commitBody = Map.of("idempotency_key", "com-1");
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(commitBody);
+            when(client.commitReservation(eq("res-429"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(429, "Rate limited",
+                            Map.of("error", "LIMIT_EXCEEDED", "message", "Rate limited", "request_id", "r1"),
+                            3000));
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(retryEngine).schedule(eq("res-429"), eq(commitBody), anyMap(), eq(3000));
+            verify(client, never()).releaseReservation(anyString(), any(Object.class));
+        }
+
+        @Test
+        void shouldScheduleRetryOnBodyless429() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-429b")));
+            Map<String, Object> commitBody = Map.of("idempotency_key", "com-1");
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(commitBody);
+            // 429 without an error body (proxy/load-balancer throttle)
+            when(client.commitReservation(eq("res-429b"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(429, "Too many requests", Map.of()));
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(retryEngine).schedule(eq("res-429b"), eq(commitBody), anyMap(), isNull());
+            verify(client, never()).releaseReservation(anyString(), any(Object.class));
+        }
+
+        @Test
+        void shouldScheduleAndNotReleaseOnAuthFailure() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-401")));
+            Map<String, Object> commitBody = Map.of("idempotency_key", "com-1");
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(commitBody);
+            when(client.commitReservation(eq("res-401"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(401, "Unauthorized",
+                            Map.of("error", "UNAUTHORIZED", "message", "Unauthorized", "request_id", "r1")));
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            // Never release — that would return budget for spend that already happened
+            verify(retryEngine).schedule(eq("res-401"), eq(commitBody), anyMap(), isNull());
+            verify(client, never()).releaseReservation(anyString(), any(Object.class));
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void shouldScheduleEventFallbackAndNotReleaseOnExpired() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            Map<String, Object> subject = Map.of("tenant", "test-tenant");
+            Map<String, Object> action = Map.of("kind", "llm", "name", "complete");
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1", "subject", subject, "action", action));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-exp")));
+            Map<String, Object> actual = Map.of("unit", "TOKENS", "amount", 1000);
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1", "actual", actual,
+                            "metadata", Map.of("trace", "abc")));
+            when(client.commitReservation(eq("res-exp"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(410, "Expired",
+                            Map.of("error", "RESERVATION_EXPIRED", "message", "Expired", "request_id", "r1")));
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            org.mockito.ArgumentCaptor<Map<String, Object>> fallbackCaptor =
+                    org.mockito.ArgumentCaptor.forClass(Map.class);
+            verify(retryEngine).scheduleEvent(eq("res-exp"), fallbackCaptor.capture());
+            verify(retryEngine, never()).schedule(anyString(), any(), any(), any());
+            verify(client, never()).releaseReservation(anyString(), any(Object.class));
+
+            Map<String, Object> fallback = fallbackCaptor.getValue();
+            assertThat(fallback)
+                    .containsEntry("idempotency_key", "com-1")
+                    .containsEntry("subject", subject)
+                    .containsEntry("action", action)
+                    .containsEntry("actual", actual)
+                    .doesNotContainKey("overage_policy");
+            Map<String, Object> metadata = (Map<String, Object>) fallback.get("metadata");
+            assertThat(metadata)
+                    .containsEntry("trace", "abc")
+                    .containsEntry("recovered_reservation_id", "res-exp")
+                    .containsEntry("recovery_reason", "commit_after_reservation_expired");
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void shouldCarryFallbackWithRecoveryMetadataOnTransientFailure() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            Map<String, Object> subject = Map.of("tenant", "test-tenant");
+            Map<String, Object> action = Map.of("kind", "llm", "name", "complete");
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1", "subject", subject, "action", action));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-fb")));
+            Map<String, Object> metrics = Map.of("latency_ms", 12);
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1",
+                            "actual", Map.of("unit", "TOKENS", "amount", 1000),
+                            "metrics", metrics));
+            when(client.commitReservation(eq("res-fb"), any(Object.class)))
+                    .thenReturn(CyclesResponse.transportError(new RuntimeException("connection reset")));
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            org.mockito.ArgumentCaptor<Map<String, Object>> fallbackCaptor =
+                    org.mockito.ArgumentCaptor.forClass(Map.class);
+            verify(retryEngine).schedule(eq("res-fb"), anyMap(), fallbackCaptor.capture(), isNull());
+
+            Map<String, Object> fallback = fallbackCaptor.getValue();
+            assertThat(fallback)
+                    .containsEntry("subject", subject)
+                    .containsEntry("action", action)
+                    .containsEntry("metrics", metrics);
+            Map<String, Object> metadata = (Map<String, Object>) fallback.get("metadata");
+            assertThat(metadata)
+                    .containsEntry("recovered_reservation_id", "res-fb")
+                    .containsEntry("recovery_reason", "commit_after_reservation_expired");
         }
     }
 
@@ -1355,7 +1539,7 @@ class CyclesLifecycleServiceTest {
     class CommitReservationExpired {
 
         @Test
-        void shouldSkipReleaseAndRetryOnReservationExpired() throws Throwable {
+        void shouldSkipReleaseAndRecoverViaEventOnReservationExpired() throws Throwable {
             Cycles cycles = mockCycles(false);
             Method method = dummyMethod();
             Object[] args = {100};
@@ -1378,9 +1562,10 @@ class CyclesLifecycleServiceTest {
                     "llm", "complete"
             );
 
-            // Should NOT release or retry
+            // Should NOT release or commit-retry; spend is recovered via /v1/events
             verify(client, never()).releaseReservation(anyString(), any(Object.class));
-            verify(retryEngine, never()).schedule(anyString(), any());
+            verify(retryEngine, never()).schedule(anyString(), any(), any(), any());
+            verify(retryEngine).scheduleEvent(eq("res-expired"), anyMap());
         }
     }
 
@@ -1420,7 +1605,8 @@ class CyclesLifecycleServiceTest {
 
             // Should not release or retry for unrecognized status
             verify(client, never()).releaseReservation(anyString(), any(Object.class));
-            verify(retryEngine, never()).schedule(anyString(), any());
+            verify(retryEngine, never()).schedule(anyString(), any(), any(), any());
+            verify(retryEngine, never()).scheduleEvent(anyString(), any());
         }
     }
 

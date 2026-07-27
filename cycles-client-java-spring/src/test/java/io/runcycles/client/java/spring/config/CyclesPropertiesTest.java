@@ -31,6 +31,15 @@ class CyclesPropertiesTest {
             assertThat(retry.getInitialDelay()).isEqualTo(Duration.ofMillis(500));
             assertThat(retry.getMultiplier()).isEqualTo(2.0);
             assertThat(retry.getMaxDelay()).isEqualTo(Duration.ofSeconds(30));
+            assertThat(retry.getFlushTimeout()).isEqualTo(Duration.ofSeconds(10));
+        }
+
+        @Test
+        void journalDefaults() {
+            var props = new CyclesProperties();
+            CyclesProperties.Journal journal = props.getJournal();
+            assertThat(journal.isEnabled()).isTrue();
+            assertThat(journal.getDir()).isNull();
         }
 
         @Test
@@ -70,12 +79,25 @@ class CyclesPropertiesTest {
             retry.setInitialDelay(Duration.ofMillis(100));
             retry.setMultiplier(3.0);
             retry.setMaxDelay(Duration.ofMinutes(1));
+            retry.setFlushTimeout(Duration.ofSeconds(3));
 
             assertThat(retry.isEnabled()).isFalse();
             assertThat(retry.getMaxAttempts()).isEqualTo(10);
             assertThat(retry.getInitialDelay()).isEqualTo(Duration.ofMillis(100));
             assertThat(retry.getMultiplier()).isEqualTo(3.0);
             assertThat(retry.getMaxDelay()).isEqualTo(Duration.ofMinutes(1));
+            assertThat(retry.getFlushTimeout()).isEqualTo(Duration.ofSeconds(3));
+        }
+
+        @Test
+        void journalSetters() {
+            var props = new CyclesProperties();
+            CyclesProperties.Journal journal = props.getJournal();
+            journal.setEnabled(false);
+            journal.setDir("/var/lib/cycles/journal");
+
+            assertThat(journal.isEnabled()).isFalse();
+            assertThat(journal.getDir()).isEqualTo("/var/lib/cycles/journal");
         }
 
         @Test

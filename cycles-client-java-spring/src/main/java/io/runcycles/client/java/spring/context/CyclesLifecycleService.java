@@ -204,8 +204,10 @@ public class CyclesLifecycleService {
                     cycles, method, args, result, target, ctx.getCommitMetadata());
             Map<String, Object> commitBody = requestBuilderService.buildCommit(
                     cycles, actualAmount, metrics, commitMetadata);
+            Map<String, Object> eventFallbackBody = buildEventFallbackBody(
+                    reservationId, createBody, commitBody);
 
-            handleCommit(reservationId, commitBody);
+            handleCommit(reservationId, commitBody, eventFallbackBody);
 
             return result;
 
@@ -222,7 +224,42 @@ public class CyclesLifecycleService {
     // -------------------------
     // Commit
     // -------------------------
-    private void handleCommit(String reservationId, Map<String, Object> commitBody) {
+
+    /**
+     * Builds a {@code POST /v1/events} body that records the spend of a commit whose
+     * reservation expired before the commit landed (the server has already returned
+     * the reserved budget to the pool at that point).
+     *
+     * <p>Reuses the commit's idempotency key — the event idempotency namespace is
+     * separate, so replays across JVM restarts stay exactly-once. Omits
+     * {@code overage_policy}: the spec default ALLOW_IF_AVAILABLE never rejects,
+     * which is the right bias when the spend has already happened.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> buildEventFallbackBody(String reservationId,
+                                                              Map<String, Object> createBody,
+                                                              Map<String, Object> commitBody) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (commitBody.get("metadata") instanceof Map<?, ?> existing) {
+            metadata.putAll((Map<String, Object>) existing);
+        }
+        metadata.put("recovered_reservation_id", reservationId);
+        metadata.put("recovery_reason", "commit_after_reservation_expired");
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("idempotency_key", commitBody.get("idempotency_key"));
+        body.put("subject", createBody.get("subject"));
+        body.put("action", createBody.get("action"));
+        body.put("actual", commitBody.get("actual"));
+        body.put("metadata", metadata);
+        if (commitBody.containsKey("metrics")) {
+            body.put("metrics", commitBody.get("metrics"));
+        }
+        return body;
+    }
+
+    private void handleCommit(String reservationId, Map<String, Object> commitBody,
+                              Map<String, Object> eventFallbackBody) {
         try {
             LOG.debug("Committing reservation: reservationId={}, commitBody={}", reservationId, commitBody);
             long comT1 = System.currentTimeMillis();
@@ -242,12 +279,28 @@ public class CyclesLifecycleService {
                         reservationId, commitResponse.getErrorMessage(), commitResponse.getBody());
                 ErrorCode commitErrorCode = extractErrorCode(commitResponse);
                 if (commitResponse.isTransportError() || commitResponse.is5xx()
+                        || commitResponse.getStatus() == 429
                         || (commitErrorCode != null && commitErrorCode.isRetryable())) {
-                    retryEngine.schedule(reservationId, commitBody);
-                } else if (commitErrorCode == ErrorCode.RESERVATION_FINALIZED
-                        || commitErrorCode == ErrorCode.RESERVATION_EXPIRED) {
-                    LOG.warn("Reservation already finalized/expired, skipping release: reservationId={}, errorCode={}",
-                            reservationId, commitErrorCode);
+                    // Transient (transport, 5xx, or 429/LIMIT_EXCEEDED rate limiting —
+                    // including bodyless 429s): not a rejection, so releasing would
+                    // return budget for spend that already happened. Retry instead,
+                    // honoring the server's Retry-After.
+                    Integer retryAfterMs = commitResponse.getStatus() == 429
+                            ? commitResponse.getRetryAfterMs() : null;
+                    retryEngine.schedule(reservationId, commitBody, eventFallbackBody, retryAfterMs);
+                } else if (commitResponse.getStatus() == 401 || commitResponse.getStatus() == 403) {
+                    // Credentials failed after the spend happened: journal the commit
+                    // for replay once they're fixed. Never release — that would return
+                    // budget for real spend.
+                    LOG.error("Commit got authentication failure (status={}); scheduling for replay: "
+                            + "reservationId={}", commitResponse.getStatus(), reservationId);
+                    retryEngine.schedule(reservationId, commitBody, eventFallbackBody, null);
+                } else if (commitErrorCode == ErrorCode.RESERVATION_EXPIRED) {
+                    LOG.warn("Reservation expired before commit; recovering spend via POST /v1/events: "
+                            + "reservationId={}", reservationId);
+                    retryEngine.scheduleEvent(reservationId, eventFallbackBody);
+                } else if (commitErrorCode == ErrorCode.RESERVATION_FINALIZED) {
+                    LOG.warn("Reservation already finalized, skipping release: reservationId={}", reservationId);
                 } else if (commitErrorCode == ErrorCode.IDEMPOTENCY_MISMATCH) {
                     LOG.warn("Commit idempotency mismatch (not releasing): reservationId={}", reservationId);
                 } else if (commitResponse.is4xx()) {
@@ -259,7 +312,7 @@ public class CyclesLifecycleService {
 
         } catch (Exception e) {
             LOG.error("Failed to commit reservation: reservationId={}", reservationId, e);
-            retryEngine.schedule(reservationId, commitBody);
+            retryEngine.schedule(reservationId, commitBody, eventFallbackBody, null);
         }
     }
 

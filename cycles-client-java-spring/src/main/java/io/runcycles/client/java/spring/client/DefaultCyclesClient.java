@@ -166,9 +166,26 @@ public class DefaultCyclesClient implements CyclesClient {
                             } else {
                                 errorMessage = "HTTP " + status;
                             }
-                            return CyclesResponse.httpError(status, errorMessage, responseBody);
+                            Integer retryAfterMs = parseRetryAfterMs(
+                                    response.headers().asHttpHeaders().getFirst("Retry-After"));
+                            return CyclesResponse.httpError(status, errorMessage, responseBody, retryAfterMs);
                         })
         ).block();
+    }
+
+    /**
+     * Parses a {@code Retry-After} header value (integer seconds, per spec) into
+     * milliseconds. The HTTP-date form is not used by the spec and is ignored.
+     */
+    private static Integer parseRetryAfterMs(String headerValue) {
+        if (headerValue == null) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(headerValue.trim()) * 1000;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private String extractIdempotencyKey(Object body) {

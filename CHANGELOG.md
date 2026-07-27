@@ -4,14 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.3.0] - 2026-07-27
 
 ### Added
 
+- **Durable commit retries (journal + `/v1/events` fallback).** Ports the design shipped in cycles-client-python v0.5.0 ([runcycles/cycles-client-python#89](https://github.com/runcycles/cycles-client-python/pull/89)) and cycles-client-typescript v0.4.0 (#172), with a byte-compatible on-disk journal format. A commit records spend that already happened, so failed commits are now journaled to disk (`~/.runcycles/commit-journal/<identity-fingerprint>/`, one JSON file per pending commit, atomic temp-file writes) *before* background retries start, and the entry is removed only on a terminal outcome. On the next JVM start the new `JournaledCommitRetryEngine` (autoconfigured; `InMemoryCommitRetryEngine` is deprecated) replays surviving entries once per identity — commit first (idempotent), falling back to `POST /v1/events` with `recovered_reservation_id`/`recovery_reason` metadata when the reservation expired (`RESERVATION_EXPIRED`). Journal identity is a truncated PBKDF2-HMAC-SHA256 fingerprint of (base-url, tenant-or-api-key), so clients sharing a directory but using different servers or credentials never replay each other's records, and API-key rotation survives when a tenant is configured.
+- Per-attempt outcome classification (identical to the Python/TypeScript engines): 429/`LIMIT_EXCEEDED` is transient — the server's `Retry-After` becomes the floor for the next delay and is persisted as `not_before_ms` so a restart mid-wait honors it; 401/403 is terminal for the run but the journal entry is retained (fix credentials and restart to replay); other 4xx is a genuine rejection and discards the entry; transport/5xx keeps retrying and retains the entry on exhaustion.
+- `CyclesLifecycleService` first-attempt commit handling now mirrors the same rules: 429 (including bodyless) schedules a retry carrying the `Retry-After`; 401/403 schedules for replay and **never releases**; `RESERVATION_EXPIRED` recovers the spend via `POST /v1/events` instead of dropping it; genuine 4xx still releases.
+- New configuration: `cycles.journal.enabled` (default `true`), `cycles.journal.dir` (default `~/.runcycles/commit-journal`), and `cycles.retry.flush-timeout` (default `10s`) — the bounded shutdown wait (`DisposableBean`) for in-flight retries; unfinished work stays journaled.
+- `CommitRetryEngine` extended with `schedule(reservationId, commitBody, eventFallbackBody, retryAfterMs)`, `scheduleEvent(reservationId, eventBody)`, and `flush(timeout)`; the old two-arg `schedule` remains as a default method for backward compatibility.
+- `CyclesResponse.getRetryAfterMs()`: `DefaultCyclesClient` now captures the `Retry-After` header (integer seconds per spec, converted to milliseconds) on non-2xx responses.
 - Add two additive `ErrorCode` enum constants to `cycles-client-java-spring`: `LIMIT_EXCEEDED` (HTTP 429 server-side throttling with `Retry-After`, added to the runtime `ErrorCode` enum in `cycles-protocol-v0.yaml` revision v0.1.25.12) and `TENANT_CLOSED` (HTTP 409 permanent denial when the owning tenant is CLOSED — also surfaced as `reason_code` on dry-run/decide DENYs — added in revision v0.1.25.13). Enum order mirrors the spec: `… MAX_EXTENSIONS_EXCEEDED, LIMIT_EXCEEDED, TENANT_CLOSED, INTERNAL_ERROR`.
 
 ### Fixed
 
+- Failed commits no longer vanish on JVM exit or silently drop when retries are disabled — with retries disabled the pending commit is still journaled for replay on the next run; only when the journal is *also* disabled is the old drop-with-warning behavior kept.
 - Retry semantics for `TENANT_CLOSED`: `ErrorCode.isRetryable()` now classifies `LIMIT_EXCEEDED` as retryable (transient 429 throttling) and `TENANT_CLOSED` as non-retryable (permanent 409). Previously both codes were unrecognized and fell through to `UNKNOWN`, which `isRetryable()` treats as retryable — so `TENANT_CLOSED` was incorrectly retryable. This corrects that classification. `LIMIT_EXCEEDED` retains the retryable default, so its behavior is unchanged (ergonomics/typing only).
 
 ## [0.2.5] - 2026-06-18
