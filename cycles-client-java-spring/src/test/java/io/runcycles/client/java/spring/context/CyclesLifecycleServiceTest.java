@@ -1219,7 +1219,11 @@ class CyclesLifecycleServiceTest {
         }
 
         @Test
-        void shouldScheduleFirstBeatAtHalfRequestedTtl() throws Throwable {
+        void shouldScheduleFirstBeatImmediately() throws Throwable {
+            // v2.3: ANY bounded first-beat delay can outlive a small capped lease (tenant
+            // policy max_reservation_ttl_ms caps silently and the create response has no
+            // effective-TTL field), so the first one-shot fires at ~0ms and primes the
+            // grant observation that drives all later cadence.
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
             Method method = dummyMethod();
@@ -1242,45 +1246,67 @@ class CyclesLifecycleServiceTest {
                     "llm", "complete"
             );
 
-            // first beat = min(requestedTtl/2, 30000) = 10000ms; no Date hint
             verify(heartbeatExecutor).schedule(
-                    any(Runnable.class), eq(10000L), eq(TimeUnit.MILLISECONDS));
+                    any(Runnable.class), eq(0L), eq(TimeUnit.MILLISECONDS));
         }
 
         @Test
-        void shouldCapFirstBeatAtThirtySeconds() throws Throwable {
-            // requested 60s, no Date hint: min(30000, 30000) = 30000. The 30s ceiling is
-            // cheap insurance against a silently capped grant the client cannot see.
+        void shouldRetryFailedFirstBeatAtHeldCadenceNotZeroWithSameKey() throws Throwable {
+            // The first beat fires at 0, but a transiently FAILED first extend must not
+            // reschedule at 0 (a hot-loop against a down server): before any grant is
+            // observed the retry delay is the held cadence min(requestedTtl/2, 30s)
+            // = 30000 for a 60s request — and the retry replays the SAME idempotency key.
+            useClockedService();
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(60000L);
             Method method = dummyMethod();
             Object[] args = {100};
             Object target = CyclesLifecycleServiceTest.this;
 
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
             when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200, allowResponse("res-hb-60")));
+                    .thenReturn(CyclesResponse.success(200, allowResponseWithExpiry("res-hb-60", initialExpiry)));
+            when(requestBuilderService.buildExtend(eq(60000L), isNull()))
+                    .thenReturn(Map.of("idempotency_key", "ext-template", "extend_by_ms", 60000L));
+            when(client.extendReservation(eq("res-hb-60"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(503, "Unavailable", Map.of()))
+                    .thenReturn(CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", initialExpiry + 60000L)));
             when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "com-1"));
             when(client.commitReservation(anyString(), any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
 
             service.executeWithReservation(
-                    () -> "ok",
+                    () -> {
+                        Runnable beat = capturedHeartbeat.get();
+                        beat.run(); // primed beat at t=0: extend fails transiently -> key kept
+                        advanceClockMs(30000);
+                        beat.run(); // retry at held cadence: SAME key, succeeds
+                        return "ok";
+                    },
                     cycles, method, args, target,
                     "llm", "complete"
             );
 
-            verify(heartbeatExecutor).schedule(
-                    any(Runnable.class), eq(30000L), eq(TimeUnit.MILLISECONDS));
+            // 0 (primed), then the held cadence after the transient failure — never 0
+            // again — then the normal grant-derived cadence clamp(60000/2, 500, 30000)
+            assertThat(scheduledDelays).containsExactly(0L, 30000L, 30000L);
+            org.mockito.ArgumentCaptor<Object> bodyCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+            verify(client, times(2)).extendReservation(eq("res-hb-60"), bodyCaptor.capture());
+            assertThat(idempotencyKeyOf(bodyCaptor.getAllValues().get(1)))
+                    .isEqualTo(idempotencyKeyOf(bodyCaptor.getAllValues().get(0)));
         }
 
         @Test
-        void shouldUseHalfTtlFirstBeatWithNoFloorForSmallTtl() throws Throwable {
-            // ttl=1200: a 1000ms floor would fire the first beat with only 200ms of
-            // lifetime left — a guaranteed lapse window. First beat must be ttl/2 = 600.
+        void shouldUseHalfTtlSteadyCadenceWithNoFloorForSmallTtl() throws Throwable {
+            // ttl=1200: a 1000ms interval floor would beat with only 200ms of lifetime
+            // left — a guaranteed lapse window. Steady-state cadence must be
+            // clamp(1200/2, 500, 600) = 600 after the immediate first beat.
             useClockedService();
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(1200L);
@@ -1309,9 +1335,8 @@ class CyclesLifecycleServiceTest {
             service.executeWithReservation(
                     () -> {
                         Runnable beat = capturedHeartbeat.get();
-                        advanceClockMs(600);  // beat 1: leadMin 0-600=-600 -> extend, grant 1200
-                        beat.run();
-                        advanceClockMs(600);  // beat 2: leadMin 1200-1200=0 < 1800 -> extend
+                        beat.run();           // beat 1 at 0: leadMin 0, no grant yet -> extend, grant 1200
+                        advanceClockMs(600);  // beat 2: leadMin 1200-600=600 < 1800 -> extend
                         beat.run();
                         return "ok";
                     },
@@ -1319,8 +1344,8 @@ class CyclesLifecycleServiceTest {
                     "llm", "complete"
             );
 
-            // first beat = ttl/2 = 600ms, no floor; next delays clamp(600, 500, 600) = 600
-            assertThat(scheduledDelays).containsExactly(600L, 600L, 600L);
+            // first beat immediate; next delays clamp(1200/2, 500, 600) = 600, no floor
+            assertThat(scheduledDelays).containsExactly(0L, 600L, 600L);
             verify(client, times(2)).extendReservation(eq("res-hb-small"), any(Object.class));
         }
 
@@ -1617,21 +1642,12 @@ class CyclesLifecycleServiceTest {
 
         /** Common stubs for ttl=20000 heartbeat scenarios (extend responses stubbed per test). */
         private void stubHeartbeatLifecycle(String reservationId, long initialExpiry) {
-            stubHeartbeatLifecycle(reservationId, initialExpiry, null);
-        }
-
-        /**
-         * Same, but the create response also carries the server {@code Date} header
-         * (epoch ms) so tests can exercise the effective-TTL recovery when a tenant
-         * policy silently caps the granted TTL below the requested one.
-         */
-        private void stubHeartbeatLifecycle(String reservationId, long initialExpiry, Long dateMs) {
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
             when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200,
-                            allowResponseWithExpiry(reservationId, initialExpiry), dateMs));
+                            allowResponseWithExpiry(reservationId, initialExpiry)));
             when(requestBuilderService.buildExtend(eq(20000L), isNull()))
                     .thenReturn(Map.of("idempotency_key", "ext-template", "extend_by_ms", 20000L));
             when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
@@ -1642,15 +1658,16 @@ class CyclesLifecycleServiceTest {
 
         @Test
         void shouldFollowLeadLowerBoundBeatPattern() throws Throwable {
-            // Server grants a full requested ttl per extend, clock advances ttl/2 per
-            // beat. leadMin = grantsSum - elapsed starts at 0 (nothing proven), so the
-            // bound must be BUILT from observed grants before a beat may skip:
-            //   beat 1: leadMin  0-10000 = -10000, lastGrant null      -> extend (sum 20000)
-            //   beat 2: leadMin 20000-20000 =   0 < 1.5*20000          -> extend (sum 40000)
-            //   beat 3: leadMin 40000-30000 = 10000 < 30000            -> extend (sum 60000)
-            //   beat 4: leadMin 60000-40000 = 20000 < 30000            -> extend (sum 80000)
-            //   beat 5: leadMin 80000-50000 = 30000 >= 1.5*lastGrant   -> skip
-            //   beat 6: leadMin 80000-60000 = 20000 < 30000            -> extend
+            // Server grants a full requested ttl per extend; the first beat is immediate
+            // and later beats fire every ttl/2. leadMin = grantsSum - elapsed starts at 0
+            // (nothing proven), so the bound must be BUILT from observed grants before a
+            // beat may skip:
+            //   beat 1 (t=0):  leadMin 0-0 = 0, lastGrant null         -> extend (sum 20000)
+            //   beat 2: leadMin 20000-10000 = 10000 < 1.5*20000        -> extend (sum 40000)
+            //   beat 3: leadMin 40000-20000 = 20000 < 30000            -> extend (sum 60000)
+            //   beat 4: leadMin 60000-30000 = 30000 >= 1.5*lastGrant   -> skip
+            //   beat 5: leadMin 60000-40000 = 20000 < 30000            -> extend (sum 80000)
+            //   beat 6: leadMin 80000-50000 = 30000 >= 30000           -> skip
             useClockedService();
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
@@ -1673,34 +1690,34 @@ class CyclesLifecycleServiceTest {
             service.executeWithReservation(
                     () -> {
                         Runnable beat = capturedHeartbeat.get();
-                        advanceClockMs(10000);
-                        beat.run(); // beat 1: no grant observed yet -> extend
+                        beat.run(); // beat 1 at t=0: no grant observed yet -> extend
                         assertThat(extendCalls.get()).isEqualTo(1);
                         advanceClockMs(10000);
-                        beat.run(); // beat 2: leadMin 0 -> extend
+                        beat.run(); // beat 2: leadMin 10000 -> extend
                         assertThat(extendCalls.get()).isEqualTo(2);
                         advanceClockMs(10000);
-                        beat.run(); // beat 3: leadMin 10000 -> extend
+                        beat.run(); // beat 3: leadMin 20000 -> extend
                         assertThat(extendCalls.get()).isEqualTo(3);
                         advanceClockMs(10000);
-                        beat.run(); // beat 4: leadMin 20000 -> extend
+                        beat.run(); // beat 4: leadMin 30000 >= 1.5*20000 -> skip, no HTTP call
+                        assertThat(extendCalls.get()).isEqualTo(3);
+                        advanceClockMs(10000);
+                        beat.run(); // beat 5: leadMin 20000 -> extend
                         assertThat(extendCalls.get()).isEqualTo(4);
                         advanceClockMs(10000);
-                        beat.run(); // beat 5: leadMin 30000 >= 1.5*20000 -> skip, no HTTP call
+                        beat.run(); // beat 6: leadMin 30000 -> skip
                         assertThat(extendCalls.get()).isEqualTo(4);
-                        advanceClockMs(10000);
-                        beat.run(); // beat 6: leadMin 20000 -> extend
-                        assertThat(extendCalls.get()).isEqualTo(5);
                         return "ok";
                     },
                     cycles, method, args, target,
                     "llm", "complete"
             );
 
-            verify(client, times(5)).extendReservation(eq("res-beat"), any(Object.class));
-            // Full grants: every rescheduled delay stays clamp(20000/2, 500, 10000) = 10000
+            verify(client, times(4)).extendReservation(eq("res-beat"), any(Object.class));
+            // Immediate first beat, then full grants keep every rescheduled delay at
+            // clamp(20000/2, 500, 10000) = 10000
             assertThat(scheduledDelays)
-                    .containsExactly(10000L, 10000L, 10000L, 10000L, 10000L, 10000L, 10000L);
+                    .containsExactly(0L, 10000L, 10000L, 10000L, 10000L, 10000L, 10000L);
         }
 
         @Test
@@ -1728,12 +1745,11 @@ class CyclesLifecycleServiceTest {
             service.executeWithReservation(
                     () -> {
                         Runnable beat = capturedHeartbeat.get();
-                        advanceClockMs(10000);
-                        beat.run(); // beat 1: extend fails (5xx) -> key kept pending
+                        beat.run(); // beat 1 at t=0: extend fails (5xx) -> key kept pending
                         advanceClockMs(10000);
                         beat.run(); // beat 2: retry with the SAME key, succeeds (grant 20000)
                         advanceClockMs(10000);
-                        beat.run(); // beat 3: leadMin -10000 -> extend with a FRESH key
+                        beat.run(); // beat 3: leadMin 0 -> extend with a FRESH key
                         return "ok";
                     },
                     cycles, method, args, target,
@@ -1771,8 +1787,7 @@ class CyclesLifecycleServiceTest {
             service.executeWithReservation(
                     () -> {
                         Runnable tick = capturedHeartbeat.get();
-                        advanceClockMs(10000);
-                        tick.run(); // tick 1: extend throws -> key kept pending
+                        tick.run(); // tick 1 at t=0: extend throws -> key kept pending
                         advanceClockMs(10000);
                         tick.run(); // tick 2: retries with the SAME key, succeeds
                         return "ok";
@@ -1824,8 +1839,8 @@ class CyclesLifecycleServiceTest {
 
             verify(client, times(1)).extendReservation(eq("res-max"), any(Object.class));
             // One-shot scheduling: a stopped beat never reschedules itself, so only the
-            // initial first-beat schedule ever happened.
-            assertThat(scheduledDelays).containsExactly(10000L);
+            // initial (immediate) first-beat schedule ever happened.
+            assertThat(scheduledDelays).containsExactly(0L);
         }
 
         @Test
@@ -1898,11 +1913,12 @@ class CyclesLifecycleServiceTest {
 
         @Test
         void shouldAdaptCadenceToCappedGrantAndKeepRequestedExtendAmount() throws Throwable {
-            // Tenant policy clamps every grant to 4000ms while the client requests 20000.
-            // The observed grant (difference of successive returned expires_at_ms values)
-            // drives ONLY the cadence: the next delay drops to clamp(4000/2, 500, 10000)
-            // = 2000ms, while extend_by_ms stays the REQUESTED 20000 (the server clamps
-            // it; sending the observed grant would compound the clamp).
+            // Tenant policy clamps every grant to 4000ms while the client requests 20000
+            // — but each extend still gains REAL lease (grant 4000 > 1.25×elapsed 2000),
+            // so this is the grant-clamp regime, not the lead-clamp one: the observed
+            // grant drives the cadence down to clamp(4000/2, 500, 10000) = 2000ms, while
+            // extend_by_ms stays the REQUESTED 20000 (the server clamps it; sending the
+            // observed grant would compound the clamp).
             useClockedService();
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
@@ -1921,12 +1937,11 @@ class CyclesLifecycleServiceTest {
             service.executeWithReservation(
                     () -> {
                         Runnable beat = capturedHeartbeat.get();
-                        advanceClockMs(10000);
-                        beat.run(); // beat 1: leadMin -10000 -> extend; grant 4000 -> delay 2000
+                        beat.run(); // beat 1 at t=0: no grant yet -> extend; grant 4000 -> delay 2000
                         advanceClockMs(2000);
-                        beat.run(); // beat 2: leadMin 4000-12000 = -8000 -> extend
+                        beat.run(); // beat 2: leadMin 4000-2000 = 2000 < 6000 -> extend
                         advanceClockMs(2000);
-                        beat.run(); // beat 3: leadMin 8000-14000 = -6000 -> extend
+                        beat.run(); // beat 3: leadMin 8000-4000 = 4000 < 6000 -> extend
                         return "ok";
                     },
                     cycles, method, args, target,
@@ -1937,8 +1952,8 @@ class CyclesLifecycleServiceTest {
             // extend_by_ms is always the requested ttl, never the observed grant
             verify(requestBuilderService, times(3)).buildExtend(eq(20000L), isNull());
             verify(requestBuilderService, never()).buildExtend(eq(4000L), isNull());
-            // first beat at requested/2, then the observed grant halves the cadence
-            assertThat(scheduledDelays).containsExactly(10000L, 2000L, 2000L, 2000L);
+            // immediate first beat, then the observed grant halves the cadence
+            assertThat(scheduledDelays).containsExactly(0L, 2000L, 2000L, 2000L);
         }
 
         @Test
@@ -1965,10 +1980,9 @@ class CyclesLifecycleServiceTest {
                     () -> {
                         capturedCtx.set(CyclesContextHolder.get());
                         Runnable beat = capturedHeartbeat.get();
+                        beat.run(); // beat 1 at t=0: 2xx, null body -> grant = requested, prevExpiry = initial + 20000
                         advanceClockMs(10000);
-                        beat.run(); // beat 1: 2xx, null body -> grant = requested, prevExpiry = initial + 20000
-                        advanceClockMs(10000);
-                        beat.run(); // beat 2: leadMin 0 -> extend; 2xx missing expiry -> += requested again
+                        beat.run(); // beat 2: leadMin 10000 < 30000 -> extend; 2xx missing expiry -> += requested again
                         return "ok";
                     },
                     cycles, method, args, target,
@@ -1979,14 +1993,47 @@ class CyclesLifecycleServiceTest {
             assertThat(capturedCtx.get().getExpiresAtMs()).isEqualTo(initialExpiry + 40000L);
         }
 
+        // NOTE: v2.2 derived a first-beat delay from the HTTP Date header
+        // (expires_at_ms − Date, halved). v2.3 removed it: any bounded first-beat
+        // delay can outlive a small capped lease, so the first one-shot fires at 0
+        // and the Date hint has nothing left to shorten. DefaultCyclesClient still
+        // captures Date (CyclesResponse.getDateMs()) as a general accessor, with
+        // its own tests in DefaultCyclesClientTest.
+
+        /** WARN events currently recorded on the CyclesLifecycleService logger. */
+        private ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> attachWarnAppender() {
+            ch.qos.logback.classic.Logger logger =
+                    (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(CyclesLifecycleService.class);
+            ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                    new ch.qos.logback.core.read.ListAppender<>();
+            appender.start();
+            logger.addAppender(appender);
+            return appender;
+        }
+
+        private void detachAppender(
+                ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender) {
+            ((ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(CyclesLifecycleService.class))
+                    .detachAppender(appender);
+        }
+
+        private long leadClampWarnCount(
+                ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender) {
+            return appender.list.stream()
+                    .filter(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN)
+                    .filter(e -> e.getFormattedMessage().contains("lead-clamped"))
+                    .count();
+        }
+
         @Test
-        void shouldUseDateHintForFirstBeatOnlyAndKeepRequestedExtendAmount() throws Throwable {
-            // Tenant policy silently caps the granted TTL at reserve (requested 20000,
-            // granted 4000). The Date-derived estimate (expires_at_ms - Date = 4000) is a
-            // first-beat cadence HINT only: it halves to a 2000ms first delay so the beat
-            // fires before the capped grant lapses. It is NOT a correctness input — the
-            // extend amount stays the REQUESTED 20000 and later cadence comes from the
-            // observed grants, never from the Date estimate.
+        void shouldHoldCadenceAndWarnOnceUnderLeadClamp() throws Throwable {
+            // Maximum-LEAD clamp: a depleting budget holds expiry at ≈ now+L, so each
+            // extend response echoes INITIAL + elapsed — successive expires_at_ms
+            // differences measure ELAPSED time, not lease. Feeding them into grant/2
+            // would collapse the cadence to the floor and burn max_extensions in
+            // seconds. v2.3 detects the regime (grant ≤ 0, or grant < 0.9×requested and
+            // ≤ 1.25×elapsed), HOLDS the cadence at min(requestedTtl/2, 30s) = 10000,
+            // keeps extending every tick (leadMin stays low), and warns exactly once.
             useClockedService();
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
@@ -1996,39 +2043,48 @@ class CyclesLifecycleServiceTest {
 
             AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
             long initialExpiry = 1_000_000L;
-            long serverDate = initialExpiry - 4000L; // Date-derived estimate = 4000ms
-            AtomicLong serverExpiry = new AtomicLong(initialExpiry);
-            stubHeartbeatLifecycle("res-capped", initialExpiry, serverDate);
-            when(client.extendReservation(eq("res-capped"), any(Object.class)))
-                    .thenAnswer(inv -> CyclesResponse.success(200,
-                            Map.of("status", "ACTIVE", "expires_at_ms", serverExpiry.addAndGet(4000L))));
+            stubHeartbeatLifecycle("res-leadclamp", initialExpiry);
+            when(client.extendReservation(eq("res-leadclamp"), any(Object.class)))
+                    .thenAnswer(inv -> CyclesResponse.success(200, Map.of(
+                            "status", "ACTIVE",
+                            // expiry held at INITIAL + elapsed (injected clock, ms)
+                            "expires_at_ms", initialExpiry + nanoClock.get() / 1_000_000L)));
 
-            service.executeWithReservation(
-                    () -> {
-                        Runnable beat = capturedHeartbeat.get();
-                        advanceClockMs(2000);
-                        beat.run(); // beat 1: no grant observed -> extend by 20000; grant 4000
-                        advanceClockMs(2000);
-                        beat.run(); // beat 2: leadMin 4000-4000 = 0 < 1.5*4000 -> extend
-                        return "ok";
-                    },
-                    cycles, method, args, target,
-                    "llm", "complete"
-            );
+            var appender = attachWarnAppender();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            Runnable beat = capturedHeartbeat.get();
+                            beat.run(); // beat 1 at t=0: grant 0 -> lead-clamp, warn, hold 10000
+                            advanceClockMs(10000);
+                            beat.run(); // beat 2: leadMin -10000 -> extend; grant 10000 = elapsed -> clamped
+                            advanceClockMs(10000);
+                            beat.run(); // beat 3: leadMin -10000 -> extend; still clamped, no 2nd warn
+                            advanceClockMs(10000);
+                            beat.run(); // beat 4: leadMin -10000 -> extend
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
 
-            // first beat = min(20000/2, 30000, 4000/2) = 2000; then observed-grant cadence
-            assertThat(scheduledDelays).containsExactly(2000L, 2000L, 2000L);
-            verify(client, times(2)).extendReservation(eq("res-capped"), any(Object.class));
-            // extend amount is ALWAYS the requested ttl, never the Date estimate
-            verify(requestBuilderService, times(2)).buildExtend(eq(20000L), isNull());
-            verify(requestBuilderService, never()).buildExtend(eq(4000L), isNull());
+            // Extends every tick — the clamped grants never satisfy the skip bound —
+            // and the cadence never tightens below the held min(20000/2, 30000).
+            verify(client, times(4)).extendReservation(eq("res-leadclamp"), any(Object.class));
+            assertThat(scheduledDelays).containsExactly(0L, 10000L, 10000L, 10000L, 10000L);
+            assertThat(leadClampWarnCount(appender)).isEqualTo(1);
         }
 
         @Test
-        void shouldIgnoreDateHintWhenItSuggestsMoreThanRequested() throws Throwable {
-            // A Date earlier than expected (proxy caching, slow response) suggests a
-            // 50000ms grant; the hint can only shorten the first delay, never stretch it
-            // beyond requested/2.
+        void shouldHoldCadenceOnZeroGrantImmediatePrime() throws Throwable {
+            // The immediate first beat can land inside the same ms as the reserve: the
+            // server echoes the unchanged expires_at_ms (grant 0). Grant-derived cadence
+            // clamp(0/2, 500, 10000) = 500 would start hammering — instead the zero
+            // grant marks the lead-clamp regime and the cadence holds at
+            // min(requestedTtl/2, 30s) = 10000, never tightening.
             useClockedService();
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
@@ -2036,98 +2092,36 @@ class CyclesLifecycleServiceTest {
             Object[] args = {100};
             Object target = CyclesLifecycleServiceTest.this;
 
-            captureHeartbeat();
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
             long initialExpiry = 1_000_000L;
-            stubHeartbeatLifecycle("res-over", initialExpiry, initialExpiry - 50_000L);
+            stubHeartbeatLifecycle("res-zerogrant", initialExpiry);
+            when(client.extendReservation(eq("res-zerogrant"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", initialExpiry)))   // grant 0
+                    .thenReturn(CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", initialExpiry + 20000L)));
 
-            service.executeWithReservation(
-                    () -> "ok",
-                    cycles, method, args, target,
-                    "llm", "complete"
-            );
+            var appender = attachWarnAppender();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            Runnable beat = capturedHeartbeat.get();
+                            beat.run(); // beat 1 at t=0: grant 0 -> held cadence 10000, warn
+                            advanceClockMs(10000);
+                            beat.run(); // beat 2: leadMin -10000 -> extend; real grant 20000 -> normal
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
 
-            // min(10000, 30000, 25000) = 10000
-            verify(heartbeatExecutor).schedule(
-                    any(Runnable.class), eq(10000L), eq(TimeUnit.MILLISECONDS));
-        }
-
-        @Test
-        void shouldNotClampMangledDateHintUpward() throws Throwable {
-            // A mangled Date implying a 400ms grant just fires the first beat early
-            // (200ms) — one harmless extend. v2.1 clamped the estimate up to 1000ms,
-            // which fabricated lease time the server never granted; the hint is now
-            // taken as-is because an early beat costs nothing and a late one lapses.
-            useClockedService();
-            Cycles cycles = mockCycles(false);
-            when(cycles.ttlMs()).thenReturn(20000L);
-            Method method = dummyMethod();
-            Object[] args = {100};
-            Object target = CyclesLifecycleServiceTest.this;
-
-            captureHeartbeat();
-            long initialExpiry = 1_000_000L;
-            stubHeartbeatLifecycle("res-under", initialExpiry, initialExpiry - 400L);
-
-            service.executeWithReservation(
-                    () -> "ok",
-                    cycles, method, args, target,
-                    "llm", "complete"
-            );
-
-            // min(10000, 30000, 400/2) = 200
-            verify(heartbeatExecutor).schedule(
-                    any(Runnable.class), eq(200L), eq(TimeUnit.MILLISECONDS));
-        }
-
-        @Test
-        void shouldIgnoreNonPositiveDateHint() throws Throwable {
-            // A Date at or after expires_at_ms (clock disagreement between the servlet
-            // container's Date and the Redis-derived expires_at_ms) yields a
-            // non-positive estimate — discarded entirely, falling back to requested/2.
-            useClockedService();
-            Cycles cycles = mockCycles(false);
-            when(cycles.ttlMs()).thenReturn(20000L);
-            Method method = dummyMethod();
-            Object[] args = {100};
-            Object target = CyclesLifecycleServiceTest.this;
-
-            captureHeartbeat();
-            long initialExpiry = 1_000_000L;
-            stubHeartbeatLifecycle("res-negdate", initialExpiry, initialExpiry + 5_000L);
-
-            service.executeWithReservation(
-                    () -> "ok",
-                    cycles, method, args, target,
-                    "llm", "complete"
-            );
-
-            verify(heartbeatExecutor).schedule(
-                    any(Runnable.class), eq(10000L), eq(TimeUnit.MILLISECONDS));
-        }
-
-        @Test
-        void shouldCapFirstBeatAtThirtySecondsEvenWithLargeDateHint() throws Throwable {
-            // Requested 24h with a Date hint of 1h: min(43_200_000, 30_000, 1_800_000)
-            // = 30000 — the 30s ceiling wins over both.
-            useClockedService();
-            Cycles cycles = mockCycles(false);
-            when(cycles.ttlMs()).thenReturn(24L * 60 * 60 * 1000);
-            Method method = dummyMethod();
-            Object[] args = {100};
-            Object target = CyclesLifecycleServiceTest.this;
-
-            captureHeartbeat();
-            long initialExpiry = 100_000_000L;
-            stubHeartbeatLifecycle("res-24h", initialExpiry, initialExpiry - 3_600_000L);
-
-            service.executeWithReservation(
-                    () -> "ok",
-                    cycles, method, args, target,
-                    "llm", "complete"
-            );
-
-            verify(heartbeatExecutor).schedule(
-                    any(Runnable.class), eq(30000L), eq(TimeUnit.MILLISECONDS));
+            verify(client, times(2)).extendReservation(eq("res-zerogrant"), any(Object.class));
+            // held 10000 after the zero grant (NOT the 500 floor), then normal cadence
+            assertThat(scheduledDelays).containsExactly(0L, 10000L, 10000L);
+            assertThat(leadClampWarnCount(appender)).isEqualTo(1);
         }
 
         @Test

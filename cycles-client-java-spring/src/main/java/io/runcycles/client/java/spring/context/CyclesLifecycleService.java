@@ -199,7 +199,7 @@ public class CyclesLifecycleService {
         CyclesContextHolder.set(ctx);
 
         Runnable heartbeatCanceller = scheduleHeartbeat(
-                reservationId, cycles.ttlMs(), expiresAtMs, reservationResponse.getDateMs(), ctx);
+                reservationId, cycles.ttlMs(), expiresAtMs, ctx);
 
         try {
             // Execute guarded action
@@ -376,36 +376,20 @@ public class CyclesLifecycleService {
      * (run it to stop the heartbeat), or {@code null} when no heartbeat is needed.
      */
     private Runnable scheduleHeartbeat(String reservationId, long requestedTtlMs,
-                                       Long expiresAtMs, Long serverDateMs,
-                                       CyclesReservationContext ctx) {
+                                       Long expiresAtMs, CyclesReservationContext ctx) {
         if (expiresAtMs == null || requestedTtlMs <= 0) {
             return null;
         }
-        // FIRST-BEAT CADENCE. Tenant policy max_reservation_ttl_ms silently CAPS the
-        // granted TTL at reserve time (governance default 1 hour) and the create response
-        // has no effective-TTL field, so requestedTtl/2 alone could schedule the first
-        // beat long after expiry (a 24h request capped to 1h would first beat at 12h).
-        // Two hints bound the first delay:
-        //   - a hard 30s ceiling — cheap insurance against any unknown cap;
-        //   - the Date-derived estimate (expires_at_ms − Date header), HALVED, when
-        //     positive. This is a cadence HINT only, never a correctness input: per
-        //     RFC 9110 Date is a whole-second, best-effort origination timestamp that
-        //     intermediaries may replace, and it is not even guaranteed to share a clock
-        //     with expires_at_ms (in cycles-server expires_at_ms comes from Redis TIME
-        //     while Date comes from the servlet container). It is deliberately NOT
-        //     clamped upward: a mangled Date merely makes the first beat early, which
-        //     costs one harmless extend — clamping it up would fabricate lease time.
-        // Correctness (never letting the reservation lapse while skipping beats) comes
-        // from the leadMin lower bound below, which uses no cross-clock arithmetic.
-        long firstDelayMs = Math.min(requestedTtlMs / 2, 30_000L);
-        if (serverDateMs != null) {
-            long dateDerivedEstMs = expiresAtMs - serverDateMs;
-            if (dateDerivedEstMs > 0) {
-                firstDelayMs = Math.min(firstDelayMs, dateDerivedEstMs / 2);
-            }
-        }
-        LOG.debug("Scheduling heartbeat: reservationId={}, requestedTtlMs={}, firstDelayMs={}",
-                reservationId, requestedTtlMs, firstDelayMs);
+        // FIRST BEAT. Immediate (~0ms). Tenant policy max_reservation_ttl_ms silently
+        // CAPS the granted TTL at reserve time (governance default 1 hour) and the
+        // create response carries no effective-TTL field, so ANY bounded first-beat
+        // delay can outlive a small capped lease (a 30s delay lapses a 10s cap before
+        // the first extend). An immediate first extend costs one cheap request and
+        // primes the grant observation below, which then drives all later cadence.
+        // The Date-derived first-beat hint from v2.2 is gone: it was cross-clock
+        // arithmetic on a best-effort header, and delay 0 dominates it anyway.
+        LOG.debug("Scheduling heartbeat: reservationId={}, requestedTtlMs={}, firstDelayMs=0",
+                reservationId, requestedTtlMs);
         // LEAD LOWER BOUND. extend_by_ms is relative to the CURRENT expires_at_ms, so
         // blindly extending on every beat would drift expiry ahead of the client (a
         // zombie budget lockup if the process dies) and burn the server's capped
@@ -425,10 +409,23 @@ public class CyclesLifecycleService {
         //
         // SCHEDULING. Beats are one-shot and self-rescheduling (schedule, not
         // scheduleAtFixedRate) so the cadence can adapt to the observed grant:
-        // after a success the next delay is clamp(lastGrant/2, 500, requestedTtl/2).
+        // after a success the next delay is clamp(grant/2, 500, requestedTtl/2).
         // One-shot scheduling also removes the fixed-rate catch-up hazard by
         // construction — there is no queue of missed ticks to fire back-to-back,
         // because the next beat is only scheduled when the current one finishes.
+        //
+        // LEAD-CLAMP REGIME. Grant-derived cadence is only valid when the server
+        // grants real per-extend lease. Under a maximum-LEAD clamp (a depleting
+        // budget holds expiry at ≈ now+L), successive expires_at_ms differences
+        // measure ELAPSED time, not lease — feeding them into grant/2 would collapse
+        // the cadence to the floor and burn the capped max_extensions in seconds.
+        // Each success therefore compares the observed grant against the elapsed
+        // time since the previous success (first: since heartbeat start): a
+        // non-positive grant, or one both well below the requested ttl (< 0.9×) and
+        // indistinguishable from elapsed (≤ 1.25×elapsed), marks the lead-clamp
+        // regime — the cadence HOLDS at min(requestedTtl/2, 30s), never tightens,
+        // and a single WARN flags the likely budget depletion. Real per-extend
+        // grants (e.g. a policy-capped but genuine lease) still tighten normally.
         //
         // FAILURE HANDLING. A failed extend keeps its idempotency key and retries it on
         // the next beat (at the current delay), so a lost response can never
@@ -437,10 +434,16 @@ public class CyclesLifecycleService {
         // stop the heartbeat for good — all irreversible; no amount of retrying can
         // revive those.
         final long anchorNanos = nanoClock.getAsLong();
+        // Held cadence for the lead-clamp regime, and the retry delay while no grant
+        // has been observed yet (the first beat fires at 0 — retrying a failed first
+        // extend at delay 0 would busy-spin).
+        final long heldCadenceMs = Math.min(requestedTtlMs / 2, 30_000L);
         AtomicLong prevExpiry = new AtomicLong(expiresAtMs);
         AtomicLong grantsSum = new AtomicLong(0);
         AtomicReference<Long> lastGrant = new AtomicReference<>();
-        AtomicLong delayMs = new AtomicLong(firstDelayMs);
+        AtomicLong lastSuccessNanos = new AtomicLong(anchorNanos);
+        AtomicLong delayMs = new AtomicLong(heldCadenceMs);
+        AtomicBoolean leadClampWarned = new AtomicBoolean(false);
         AtomicReference<String> pendingKey = new AtomicReference<>();
         AtomicReference<ScheduledFuture<?>> selfRef = new AtomicReference<>();
         AtomicBoolean stopped = new AtomicBoolean(false);
@@ -492,13 +495,33 @@ public class CyclesLifecycleService {
                             long resolvedExpiry = newExpiresAtMs != null
                                     ? newExpiresAtMs : prev + requestedTtlMs;
                             prevExpiry.set(resolvedExpiry);
-                            grantsSum.addAndGet(appliedGrant);
-                            lastGrant.set(appliedGrant);
-                            delayMs.set(Math.max(500L, Math.min(appliedGrant / 2, requestedTtlMs / 2)));
+                            long nowNanos = nanoClock.getAsLong();
+                            long elapsedSinceSuccessMs =
+                                    (nowNanos - lastSuccessNanos.getAndSet(nowNanos)) / 1_000_000L;
+                            // Lead-clamp regime detection (see LEAD-CLAMP REGIME above):
+                            // grant-derived cadence is only valid for real per-extend
+                            // grants, never for elapsed-time echoes of a clamped lead.
+                            boolean leadClamped = appliedGrant <= 0
+                                    || (appliedGrant < requestedTtlMs * 9 / 10
+                                        && appliedGrant <= elapsedSinceSuccessMs + elapsedSinceSuccessMs / 4);
+                            if (leadClamped) {
+                                delayMs.set(heldCadenceMs);
+                                if (leadClampWarned.compareAndSet(false, true)) {
+                                    LOG.warn("Heartbeat extends are not gaining lease (grantMs={} vs "
+                                            + "elapsedMs={} — expiry appears lead-clamped, likely budget "
+                                            + "depletion); holding cadence at {}ms: reservationId={}",
+                                            appliedGrant, elapsedSinceSuccessMs, heldCadenceMs, reservationId);
+                                }
+                            } else {
+                                delayMs.set(Math.max(500L, Math.min(appliedGrant / 2, requestedTtlMs / 2)));
+                            }
+                            long creditedGrant = Math.max(appliedGrant, 0L);
+                            grantsSum.addAndGet(creditedGrant);
+                            lastGrant.set(creditedGrant);
                             ctx.updateExpiresAtMs(resolvedExpiry);
                             LOG.debug("Heartbeat extend successful: reservationId={}, newExpiresAtMs={}, "
-                                    + "grantMs={}, nextDelayMs={}",
-                                    reservationId, resolvedExpiry, appliedGrant, delayMs.get());
+                                    + "grantMs={}, leadClamped={}, nextDelayMs={}",
+                                    reservationId, resolvedExpiry, appliedGrant, leadClamped, delayMs.get());
                         } else {
                             ErrorCode errorCode = extractErrorCode(extendResponse);
                             if (extendResponse.getStatus() == 410
@@ -532,7 +555,7 @@ public class CyclesLifecycleService {
                 }
             }
         };
-        selfRef.set(heartbeatExecutor.schedule(beat, firstDelayMs, TimeUnit.MILLISECONDS));
+        selfRef.set(heartbeatExecutor.schedule(beat, 0L, TimeUnit.MILLISECONDS));
         return () -> {
             stopped.set(true);
             ScheduledFuture<?> f = selfRef.get();
