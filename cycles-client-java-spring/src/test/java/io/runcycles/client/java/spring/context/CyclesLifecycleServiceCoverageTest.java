@@ -295,7 +295,8 @@ class CyclesLifecycleServiceCoverageTest {
                     () -> "ok", cycles, method, new Object[]{100}, this, "llm", "complete");
 
             verify(client, never()).releaseReservation(anyString(), any(Object.class));
-            verify(retryEngine, never()).schedule(anyString(), any());
+            verify(retryEngine, never()).schedule(anyString(), any(), any(), any());
+            verify(retryEngine).scheduleEvent(eq("res-exp"), anyMap());
         }
     }
 
@@ -328,7 +329,8 @@ class CyclesLifecycleServiceCoverageTest {
                     () -> "ok", cycles, method, new Object[]{100}, this, "llm", "complete");
 
             verify(client, never()).releaseReservation(anyString(), any(Object.class));
-            verify(retryEngine, never()).schedule(anyString(), any());
+            verify(retryEngine, never()).schedule(anyString(), any(), any(), any());
+            verify(retryEngine, never()).scheduleEvent(anyString(), any());
         }
     }
 

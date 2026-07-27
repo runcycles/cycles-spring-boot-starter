@@ -166,9 +166,36 @@ public class DefaultCyclesClient implements CyclesClient {
                             } else {
                                 errorMessage = "HTTP " + status;
                             }
-                            return CyclesResponse.httpError(status, errorMessage, responseBody);
+                            Integer retryAfterMs = parseRetryAfterMs(
+                                    response.headers().asHttpHeaders().getFirst("Retry-After"));
+                            return CyclesResponse.httpError(status, errorMessage, responseBody, retryAfterMs);
                         })
         ).block();
+    }
+
+    // Upper bound on a parsed Retry-After delay (1 hour), guarding against hostile
+    // or mangled headers parking retries for days (and against integer overflow).
+    private static final long MAX_RETRY_AFTER_MS = 3_600_000L;
+
+    /**
+     * Parses a {@code Retry-After} header value (integer seconds, per spec) into
+     * milliseconds. The HTTP-date form is not used by the spec and is ignored, as
+     * are negative values; the result is clamped to one hour.
+     */
+    private static Integer parseRetryAfterMs(String headerValue) {
+        if (headerValue == null) {
+            return null;
+        }
+        try {
+            long seconds = Long.parseLong(headerValue.trim());
+            if (seconds < 0) {
+                return null;
+            }
+            long ms = seconds >= MAX_RETRY_AFTER_MS / 1000 ? MAX_RETRY_AFTER_MS : seconds * 1000L;
+            return (int) ms;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private String extractIdempotencyKey(Object body) {

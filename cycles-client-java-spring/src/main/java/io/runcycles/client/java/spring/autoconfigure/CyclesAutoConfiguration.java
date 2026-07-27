@@ -11,7 +11,7 @@ import io.runcycles.client.java.spring.evaluation.CyclesExpressionEvaluator;
 import io.runcycles.client.java.spring.evaluation.CyclesFieldResolver;
 import io.runcycles.client.java.spring.evaluation.CyclesValueResolutionService;
 import io.runcycles.client.java.spring.retry.CommitRetryEngine;
-import io.runcycles.client.java.spring.retry.InMemoryCommitRetryEngine;
+import io.runcycles.client.java.spring.retry.JournaledCommitRetryEngine;
 import io.runcycles.client.java.spring.util.Constants;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -127,7 +127,13 @@ public class CyclesAutoConfiguration {
     }
 
     /**
-     * Registers the exponential-backoff retry engine for failed commits.
+     * Registers the durable exponential-backoff retry engine for failed commits.
+     * Pending commits are journaled to disk (see {@code cycles.journal.*}) before
+     * background retries start, survive JVM restarts, and are replayed on the next
+     * run — falling back to {@code POST /v1/events} when the reservation expired.
+     * The engine implements {@link org.springframework.beans.factory.DisposableBean},
+     * so Spring flushes in-flight retries on context shutdown, bounded by
+     * {@code cycles.retry.flush-timeout}.
      *
      * @param client the Cycles API client
      * @param props  the Cycles configuration properties
@@ -136,7 +142,7 @@ public class CyclesAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public CommitRetryEngine retryEngine(CyclesClient client, CyclesProperties props) {
-        return new InMemoryCommitRetryEngine(client, props);
+        return new JournaledCommitRetryEngine(client, props);
     }
 
     /**

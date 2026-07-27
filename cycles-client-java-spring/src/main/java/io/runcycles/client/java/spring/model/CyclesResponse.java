@@ -20,17 +20,20 @@ public class CyclesResponse<T> {
     private final String errorMessage;
     private final boolean transportError;
     private final Throwable transportException;
+    private final Integer retryAfterMs;
 
     private CyclesResponse(int status,
                            T body,
                            String errorMessage,
                            boolean transportError,
-                           Throwable transportException) {
+                           Throwable transportException,
+                           Integer retryAfterMs) {
         this.status = status;
         this.body = body;
         this.errorMessage = errorMessage;
         this.transportError = transportError;
         this.transportException = transportException;
+        this.retryAfterMs = retryAfterMs;
     }
 
     /**
@@ -42,7 +45,7 @@ public class CyclesResponse<T> {
      * @return a new success response
      */
     public static <T> CyclesResponse<T> success(int status, T body) {
-        return new CyclesResponse<>(status, body, null, false, null);
+        return new CyclesResponse<>(status, body, null, false, null, null);
     }
 
     /**
@@ -55,7 +58,22 @@ public class CyclesResponse<T> {
      * @return a new HTTP-error response
      */
     public static <T> CyclesResponse<T> httpError(int status, String errorMessage, T body) {
-        return new CyclesResponse<>(status, body, errorMessage, false, null);
+        return new CyclesResponse<>(status, body, errorMessage, false, null, null);
+    }
+
+    /**
+     * Creates an HTTP-error response (4xx/5xx) that also carries the server's
+     * {@code Retry-After} header converted to milliseconds.
+     *
+     * @param status       the HTTP status code
+     * @param errorMessage the error message
+     * @param body         the response body
+     * @param retryAfterMs the {@code Retry-After} header in milliseconds, or {@code null}
+     * @param <T>          the body type
+     * @return a new HTTP-error response
+     */
+    public static <T> CyclesResponse<T> httpError(int status, String errorMessage, T body, Integer retryAfterMs) {
+        return new CyclesResponse<>(status, body, errorMessage, false, null, retryAfterMs);
     }
 
     /**
@@ -67,7 +85,7 @@ public class CyclesResponse<T> {
      */
     public static <T> CyclesResponse<T> transportError(Throwable ex) {
         String message = ex != null ? ex.getMessage() : "Unknown transport error";
-        return new CyclesResponse<>(-1, null, message, true, ex);
+        return new CyclesResponse<>(-1, null, message, true, ex, null);
     }
 
     /**
@@ -154,6 +172,17 @@ public class CyclesResponse<T> {
      */
     public Throwable getTransportException() {
         return transportException;
+    }
+
+    /**
+     * Returns the server's {@code Retry-After} header (seconds, per spec) converted
+     * to milliseconds. Servers send this on 429 {@code LIMIT_EXCEEDED} rate-limit
+     * responses (runtime spec v0.1.25.12).
+     *
+     * @return the retry-after delay in milliseconds, or {@code null} when absent
+     */
+    public Integer getRetryAfterMs() {
+        return retryAfterMs;
     }
 
     /**

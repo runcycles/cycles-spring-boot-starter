@@ -37,6 +37,7 @@ public class CyclesProperties {
 
     private Http http = new Http();
     private Retry retry = new Retry();
+    private Journal journal = new Journal();
 
     /** HTTP connection and read timeout settings for the Cycles API client. */
     public static class Http {
@@ -75,6 +76,50 @@ public class CyclesProperties {
         public void setReadTimeout(Duration readTimeout) { this.readTimeout = readTimeout; }
     }
 
+    /**
+     * On-disk pending-commit journal settings.
+     *
+     * <p>Failed commits are journaled to disk before background retries start and
+     * removed only on a terminal outcome, so committed spend survives JVM restarts
+     * and is replayed on the next run.
+     */
+    public static class Journal {
+        private boolean enabled = true;
+        private String dir;
+
+        /** Creates a new journal settings instance with default values. */
+        Journal() {}
+
+        /**
+         * Returns whether the on-disk commit journal is enabled.
+         *
+         * @return {@code true} if the journal is enabled
+         */
+        public boolean isEnabled() { return enabled; }
+
+        /**
+         * Sets whether the on-disk commit journal is enabled.
+         *
+         * @param enabled {@code true} to enable the journal
+         */
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+
+        /**
+         * Returns the journal base directory, or {@code null} for the default
+         * ({@code ~/.runcycles/commit-journal}).
+         *
+         * @return the journal base directory, or {@code null}
+         */
+        public String getDir() { return dir; }
+
+        /**
+         * Sets the journal base directory.
+         *
+         * @param dir the journal base directory, or {@code null} for the default
+         */
+        public void setDir(String dir) { this.dir = dir; }
+    }
+
     /** Exponential-backoff retry settings for failed commit operations. */
     public static class Retry {
         private boolean enabled = true;
@@ -82,6 +127,7 @@ public class CyclesProperties {
         private Duration initialDelay = Duration.ofMillis(500);
         private double multiplier = 2.0;
         private Duration maxDelay = Duration.ofSeconds(30);
+        private Duration flushTimeout = Duration.ofSeconds(10);
 
         /** Creates a new retry settings instance with default values. */
         Retry() {}
@@ -155,6 +201,21 @@ public class CyclesProperties {
          * @param maxDelay the maximum delay duration
          */
         public void setMaxDelay(Duration maxDelay) { this.maxDelay = maxDelay; }
+
+        /**
+         * Returns the maximum time to wait for in-flight retries during shutdown.
+         *
+         * @return the flush timeout duration
+         */
+        public Duration getFlushTimeout() { return flushTimeout; }
+
+        /**
+         * Sets the maximum time to wait for in-flight retries during shutdown.
+         * Unfinished work stays journaled and replays on the next run.
+         *
+         * @param flushTimeout the flush timeout duration
+         */
+        public void setFlushTimeout(Duration flushTimeout) { this.flushTimeout = flushTimeout; }
     }
 
     /**
@@ -198,6 +259,13 @@ public class CyclesProperties {
      * @return the retry configuration
      */
     public Retry getRetry() { return retry; }
+
+    /**
+     * Returns the commit-journal settings.
+     *
+     * @return the journal configuration
+     */
+    public Journal getJournal() { return journal; }
 
     /**
      * Returns the default tenant identifier.

@@ -2,17 +2,11 @@ package io.runcycles.client.java.spring.retry;
 
 import io.runcycles.client.java.spring.client.CyclesClient;
 import io.runcycles.client.java.spring.config.CyclesProperties;
-import io.runcycles.client.java.spring.model.CyclesResponse;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.time.Duration;
-import java.util.Map;
-import java.util.concurrent.*;
 
 /**
- * In-memory {@link CommitRetryEngine} implementation using a single-thread
- * {@link ScheduledExecutorService} with exponential backoff.
+ * In-memory-only {@link CommitRetryEngine}: identical retry semantics to
+ * {@link JournaledCommitRetryEngine} but with the on-disk pending-commit journal
+ * forced off, so pending commits do not survive a JVM exit.
  *
  * <p>Retry behaviour is controlled by {@link CyclesProperties.Retry}:
  * <ul>
@@ -23,70 +17,20 @@ import java.util.concurrent.*;
  *   <li>{@code maxDelay} — upper bound on delay between retries (default {@code 30s})</li>
  * </ul>
  *
- * <p>Only retryable errors (transport failures, 5xx responses) trigger further
- * attempts; non-retryable 4xx errors are logged and abandoned.
+ * @deprecated since 0.3.0 — use {@link JournaledCommitRetryEngine}, which journals
+ *             pending commits to disk so spend that already happened survives JVM
+ *             restarts and is replayed on the next run.
  */
-public class InMemoryCommitRetryEngine implements CommitRetryEngine {
-
-    private static final Logger LOG = LoggerFactory.getLogger(InMemoryCommitRetryEngine.class);
-
-    private final CyclesClient client;
-    private final CyclesProperties.Retry props;
-    private final ScheduledExecutorService executor;
+@Deprecated(since = "0.3.0")
+public class InMemoryCommitRetryEngine extends JournaledCommitRetryEngine {
 
     /**
-     * Creates a new retry engine with the given client and configuration.
+     * Creates a new in-memory-only retry engine with the given client and configuration.
      *
      * @param client     the Cycles API client for retrying commits
      * @param properties the Cycles configuration properties containing retry settings
      */
     public InMemoryCommitRetryEngine(CyclesClient client, CyclesProperties properties) {
-        this.client = client;
-        this.props = properties.getRetry();
-        this.executor = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r);
-            t.setDaemon(true);
-            t.setName("cycles-commit-retry");
-            return t;
-        });
-    }
-
-    @Override
-    public void schedule(String reservationId, Object body) {
-        if (!props.isEnabled()) return;
-        retry(reservationId, body, 1, props.getInitialDelay());
-    }
-
-    private void retry(String id, Object body, int attempt, Duration delay) {
-        executor.schedule(() -> {
-            try {
-                CyclesResponse<Map<String, Object>> response = client.commitReservation(id, body);
-                if (response.is2xx()) {
-                    LOG.info("Commit retry succeeded: reservationId={}, attempt={}", id, attempt);
-                } else if (response.isTransportError() || response.is5xx()) {
-                    LOG.warn("Commit retry failed with retryable error: reservationId={}, attempt={}, status={}, error={}",
-                            id, attempt, response.getStatus(), response.getErrorMessage());
-                    scheduleNextAttempt(id, body, attempt, delay);
-                } else {
-                    LOG.error("Commit retry failed with non-retryable error: reservationId={}, attempt={}, status={}, error={}",
-                            id, attempt, response.getStatus(), response.getErrorMessage());
-                }
-            } catch (Exception e) {
-                LOG.error("Commit retry failed with unexpected exception: reservationId={}, attempt={}", id, attempt, e);
-                scheduleNextAttempt(id, body, attempt, delay);
-            }
-        }, delay.toMillis(), TimeUnit.MILLISECONDS);
-    }
-
-    private void scheduleNextAttempt(String id, Object body, int attempt, Duration delay) {
-        if (attempt < props.getMaxAttempts()) {
-            Duration next = delay.multipliedBy((long) props.getMultiplier());
-            if (next.compareTo(props.getMaxDelay()) > 0) {
-                next = props.getMaxDelay();
-            }
-            retry(id, body, attempt + 1, next);
-        } else {
-            LOG.error("Commit retry exhausted all attempts: reservationId={}, maxAttempts={}", id, props.getMaxAttempts());
-        }
+        super(client, properties, false);
     }
 }

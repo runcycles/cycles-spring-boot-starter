@@ -59,6 +59,22 @@ class CyclesResponseTest {
             assertThat(resp.isTransportError()).isTrue();
             assertThat(resp.getErrorMessage()).isEqualTo("Unknown transport error");
         }
+
+        @Test
+        void retryAfterMsShouldBeNullUnlessProvided() {
+            assertThat(CyclesResponse.success(200, "ok").getRetryAfterMs()).isNull();
+            assertThat(CyclesResponse.httpError(409, "conflict", "body").getRetryAfterMs()).isNull();
+            assertThat(CyclesResponse.transportError(new RuntimeException()).getRetryAfterMs()).isNull();
+        }
+
+        @Test
+        void httpErrorShouldCarryRetryAfterMs() {
+            CyclesResponse<String> resp = CyclesResponse.httpError(429, "Rate limited", "body", 3000);
+
+            assertThat(resp.getStatus()).isEqualTo(429);
+            assertThat(resp.getRetryAfterMs()).isEqualTo(3000);
+            assertThat(resp.getErrorMessage()).isEqualTo("Rate limited");
+        }
     }
 
     // ========================================================================

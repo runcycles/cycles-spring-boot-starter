@@ -8,20 +8,41 @@ import io.runcycles.client.java.spring.context.CyclesRequestBuilderService;
 import io.runcycles.client.java.spring.evaluation.CyclesExpressionEvaluator;
 import io.runcycles.client.java.spring.evaluation.CyclesValueResolutionService;
 import io.runcycles.client.java.spring.retry.CommitRetryEngine;
-import io.runcycles.client.java.spring.retry.InMemoryCommitRetryEngine;
+import io.runcycles.client.java.spring.retry.JournaledCommitRetryEngine;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DisplayName("CyclesAutoConfiguration")
 class CyclesAutoConfigurationTest {
 
+    @TempDir
+    Path journalDir;
+
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(CyclesAutoConfiguration.class));
+
+    /** Minimal no-op engine used to test bean overrides (interface is not functional). */
+    static final class NoopRetryEngine implements CommitRetryEngine {
+        @Override
+        public void schedule(String reservationId, Map<String, Object> commitBody,
+                             Map<String, Object> eventFallbackBody, Integer retryAfterMs) { /* no-op */ }
+
+        @Override
+        public void scheduleEvent(String reservationId, Map<String, Object> eventBody) { /* no-op */ }
+
+        @Override
+        public void flush(Duration timeout) { /* no-op */ }
+    }
 
     // ========================================================================
     // Bean creation
@@ -36,7 +57,8 @@ class CyclesAutoConfigurationTest {
             contextRunner
                     .withPropertyValues(
                             "cycles.base-url=http://localhost:7878",
-                            "cycles.api-key=test-key"
+                            "cycles.api-key=test-key",
+                            "cycles.journal.dir=" + journalDir
                     )
                     .run(context -> {
                         assertThat(context).hasSingleBean(CyclesClient.class);
@@ -45,7 +67,7 @@ class CyclesAutoConfigurationTest {
                         assertThat(context).hasSingleBean(CyclesValueResolutionService.class);
                         assertThat(context).hasSingleBean(CyclesRequestBuilderService.class);
                         assertThat(context).hasSingleBean(CommitRetryEngine.class);
-                        assertThat(context).hasSingleBean(InMemoryCommitRetryEngine.class);
+                        assertThat(context).hasSingleBean(JournaledCommitRetryEngine.class);
                         assertThat(context).hasSingleBean(CyclesLifecycleService.class);
                         assertThat(context).hasSingleBean(CyclesAspect.class);
                     });
@@ -116,7 +138,8 @@ class CyclesAutoConfigurationTest {
             contextRunner
                     .withPropertyValues(
                             "cycles.base-url=http://localhost:7878",
-                            "cycles.api-key=test-key"
+                            "cycles.api-key=test-key",
+                            "cycles.journal.dir=" + journalDir
                     )
                     .withBean("customCyclesClient", CyclesClient.class, () -> new CyclesClient() {
                         @Override public io.runcycles.client.java.spring.model.CyclesResponse<java.util.Map<String, Object>> createReservation(Object body) { return null; }
@@ -159,10 +182,10 @@ class CyclesAutoConfigurationTest {
                             "cycles.base-url=http://localhost:7878",
                             "cycles.api-key=test-key"
                     )
-                    .withBean(CommitRetryEngine.class, () -> (reservationId, body) -> { /* no-op */ })
+                    .withBean(CommitRetryEngine.class, NoopRetryEngine::new)
                     .run(context -> {
                         assertThat(context).hasSingleBean(CommitRetryEngine.class);
-                        assertThat(context).doesNotHaveBean(InMemoryCommitRetryEngine.class);
+                        assertThat(context).doesNotHaveBean(JournaledCommitRetryEngine.class);
                     });
         }
 
@@ -171,7 +194,8 @@ class CyclesAutoConfigurationTest {
             contextRunner
                     .withPropertyValues(
                             "cycles.base-url=http://localhost:7878",
-                            "cycles.api-key=test-key"
+                            "cycles.api-key=test-key",
+                            "cycles.journal.dir=" + journalDir
                     )
                     .withBean(CyclesExpressionEvaluator.class, CyclesExpressionEvaluator::new)
                     .run(context -> {
@@ -184,12 +208,13 @@ class CyclesAutoConfigurationTest {
             contextRunner
                     .withPropertyValues(
                             "cycles.base-url=http://localhost:7878",
-                            "cycles.api-key=test-key"
+                            "cycles.api-key=test-key",
+                            "cycles.journal.dir=" + journalDir
                     )
                     .withBean(CyclesAspect.class, () -> new CyclesAspect(
                             new CyclesLifecycleService(
                                     new DefaultCyclesClient(org.springframework.web.reactive.function.client.WebClient.create()),
-                                    (id, body) -> {},
+                                    new NoopRetryEngine(),
                                     new CyclesRequestBuilderService(new CyclesValueResolutionService(java.util.Map.of(), new io.runcycles.client.java.spring.config.CyclesProperties())),
                                     new CyclesExpressionEvaluator()
                             )
@@ -204,12 +229,13 @@ class CyclesAutoConfigurationTest {
             contextRunner
                     .withPropertyValues(
                             "cycles.base-url=http://localhost:7878",
-                            "cycles.api-key=test-key"
+                            "cycles.api-key=test-key",
+                            "cycles.journal.dir=" + journalDir
                     )
                     .withBean(CyclesLifecycleService.class, () -> {
                         return new CyclesLifecycleService(
                                 new DefaultCyclesClient(org.springframework.web.reactive.function.client.WebClient.create()),
-                                (id, body) -> {},
+                                new NoopRetryEngine(),
                                 new CyclesRequestBuilderService(new CyclesValueResolutionService(java.util.Map.of(), new io.runcycles.client.java.spring.config.CyclesProperties())),
                                 new CyclesExpressionEvaluator()
                         );

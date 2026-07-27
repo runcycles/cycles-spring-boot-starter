@@ -107,9 +107,11 @@ public String generateText(String prompt, int tokens) { ... }
 | `dryRun = true`, any decision | **Neither** | Returns `DryRunResult` or throws; no real reservation created |
 | Method returns successfully | **Commit** | Actual amount charged; unused remainder auto-released |
 | Method throws any exception | **Release** | Full reserved amount returned to budget; exception re-thrown |
-| Commit fails (5xx / network) | **Retry** | Exponential backoff; see `cycles.retry.*` config |
+| Commit fails (5xx / network) | **Retry** | Journaled to disk, then exponential backoff; see `cycles.retry.*` / `cycles.journal.*` config |
+| Commit gets 429 / LIMIT_EXCEEDED | **Retry** | Rate-limited, not rejected; the server's `Retry-After` floors the next delay |
+| Commit gets 401 / 403 | **Neither** | Journaled for replay after credentials are fixed; never released (the spend already happened) |
 | Commit fails (non-retryable 4xx) | **Release** | Reservation released after non-retryable client error |
-| Commit gets RESERVATION_EXPIRED | **Neither** | Server already reclaimed budget on TTL expiry |
+| Commit gets RESERVATION_EXPIRED | **Recover** | Server already reclaimed budget on TTL expiry; spend is recorded via `POST /v1/events` instead |
 | Commit gets RESERVATION_FINALIZED | **Neither** | Already committed or released (idempotent replay) |
 | Commit gets IDEMPOTENCY_MISMATCH | **Neither** | Previous commit already processed; no release attempted |
 
@@ -160,6 +162,12 @@ cycles:
     initial-delay: 500ms
     multiplier: 2.0
     max-delay: 30s
+    flush-timeout: 10s        # bounded shutdown wait for in-flight retries
+
+  # Durable pending-commit journal (survives JVM restarts)
+  journal:
+    enabled: true
+    # dir: /var/lib/cycles/commit-journal   # default: ~/.runcycles/commit-journal
 ```
 
 ### `@Cycles` Annotation
@@ -363,19 +371,32 @@ For long-running methods, the starter automatically extends the reservation TTL 
 
 No configuration needed — it activates automatically when the server returns an `expires_at_ms` in the reservation response.
 
-## Commit Retry
+## Commit Retry (Durable)
 
-If a commit fails due to a transient error (network failure or 5xx), the starter automatically retries with exponential backoff using a background thread. Configure via:
+A commit records spend that **already happened**, so it must never be lost. If a commit fails due to a transient error (network failure, 5xx, or 429 rate limiting), the starter journals the pending commit to disk and retries with exponential backoff on a background thread. Configure via:
 
 ```yaml
 cycles:
   retry:
-    enabled: true           # default: true
+    enabled: true            # default: true
     max-attempts: 5          # default: 5
     initial-delay: 500ms     # default: 500ms
     multiplier: 2.0          # default: 2.0
     max-delay: 30s           # default: 30s
+    flush-timeout: 10s       # default: 10s — bounded shutdown wait for in-flight retries
+  journal:
+    enabled: true            # default: true
+    # dir: ...               # default: ~/.runcycles/commit-journal
 ```
+
+Durability behavior (same design as the Python and TypeScript SDKs, journal format is cross-SDK compatible):
+
+- Every pending commit is written to the journal **before** the first background retry — even when `cycles.retry.enabled=false` — and removed only on a terminal outcome (success, or a genuine 4xx rejection). If the JVM exits mid-retry, the entry survives and is replayed on the next run (commit and event requests carry idempotency keys, so replay is exactly-once).
+- If the reservation expires before the commit lands (`RESERVATION_EXPIRED`), the spend is recovered via `POST /v1/events` with `recovered_reservation_id` and `recovery_reason` metadata.
+- 429 responses honor the server's `Retry-After` as the floor for the next delay; the floor is persisted so a restart mid-wait does not replay into the throttle window.
+- 401/403 stop retrying for the run but keep the journal entry — fix credentials and restart to replay. The reservation is never released in these paths, since releasing would return budget for real spend.
+- Journal records are scoped per (server, credential) identity via a non-reversible PBKDF2 fingerprint directory, so processes sharing a journal directory but using different servers or API keys never replay each other's records. With `cycles.tenant` configured, the tenant is the identity — pending records survive API-key rotation.
+- On Spring context shutdown the engine waits up to `cycles.retry.flush-timeout` for in-flight retries; unfinished work stays journaled.
 
 ## Dry Run (Shadow Mode)
 
@@ -542,8 +563,9 @@ cycles-spring-boot-starter/
 │       ├── config/                    # CyclesProperties
 │       ├── context/                   # CyclesContextHolder, request builders
 │       ├── evaluation/                # SpEL evaluator, field resolvers
+│       ├── journal/                   # Durable pending-commit journal
 │       ├── model/                     # Decision, Caps, ErrorCode, exceptions
-│       ├── retry/                     # CommitRetryEngine
+│       ├── retry/                     # CommitRetryEngine, JournaledCommitRetryEngine
 │       └── util/                      # Constants, validation
 └── cycles-demo-client-java-spring/    # Demo application
     └── src/main/java/io/runcycles/demo/client/spring/
