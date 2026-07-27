@@ -21,19 +21,22 @@ public class CyclesResponse<T> {
     private final boolean transportError;
     private final Throwable transportException;
     private final Integer retryAfterMs;
+    private final Long dateMs;
 
     private CyclesResponse(int status,
                            T body,
                            String errorMessage,
                            boolean transportError,
                            Throwable transportException,
-                           Integer retryAfterMs) {
+                           Integer retryAfterMs,
+                           Long dateMs) {
         this.status = status;
         this.body = body;
         this.errorMessage = errorMessage;
         this.transportError = transportError;
         this.transportException = transportException;
         this.retryAfterMs = retryAfterMs;
+        this.dateMs = dateMs;
     }
 
     /**
@@ -45,7 +48,21 @@ public class CyclesResponse<T> {
      * @return a new success response
      */
     public static <T> CyclesResponse<T> success(int status, T body) {
-        return new CyclesResponse<>(status, body, null, false, null, null);
+        return new CyclesResponse<>(status, body, null, false, null, null, null);
+    }
+
+    /**
+     * Creates a successful response that also carries the server's {@code Date}
+     * response header parsed to epoch milliseconds.
+     *
+     * @param status the HTTP status code
+     * @param body   the response body
+     * @param dateMs the {@code Date} header in epoch milliseconds, or {@code null}
+     * @param <T>    the body type
+     * @return a new success response
+     */
+    public static <T> CyclesResponse<T> success(int status, T body, Long dateMs) {
+        return new CyclesResponse<>(status, body, null, false, null, null, dateMs);
     }
 
     /**
@@ -58,7 +75,7 @@ public class CyclesResponse<T> {
      * @return a new HTTP-error response
      */
     public static <T> CyclesResponse<T> httpError(int status, String errorMessage, T body) {
-        return new CyclesResponse<>(status, body, errorMessage, false, null, null);
+        return new CyclesResponse<>(status, body, errorMessage, false, null, null, null);
     }
 
     /**
@@ -73,7 +90,7 @@ public class CyclesResponse<T> {
      * @return a new HTTP-error response
      */
     public static <T> CyclesResponse<T> httpError(int status, String errorMessage, T body, Integer retryAfterMs) {
-        return new CyclesResponse<>(status, body, errorMessage, false, null, retryAfterMs);
+        return new CyclesResponse<>(status, body, errorMessage, false, null, retryAfterMs, null);
     }
 
     /**
@@ -85,7 +102,7 @@ public class CyclesResponse<T> {
      */
     public static <T> CyclesResponse<T> transportError(Throwable ex) {
         String message = ex != null ? ex.getMessage() : "Unknown transport error";
-        return new CyclesResponse<>(-1, null, message, true, ex, null);
+        return new CyclesResponse<>(-1, null, message, true, ex, null, null);
     }
 
     /**
@@ -183,6 +200,20 @@ public class CyclesResponse<T> {
      */
     public Integer getRetryAfterMs() {
         return retryAfterMs;
+    }
+
+    /**
+     * Returns the server's {@code Date} response header parsed to epoch milliseconds.
+     * Captured on successful (2xx) responses only. This is a SERVER-frame timestamp:
+     * subtracting it from server-frame fields like {@code expires_at_ms} yields a
+     * duration that is immune to client/server clock skew — the heartbeat uses it to
+     * recover the effective TTL when a tenant policy silently caps the requested one.
+     *
+     * @return the {@code Date} header in epoch milliseconds, or {@code null} when
+     *         absent or unparseable
+     */
+    public Long getDateMs() {
+        return dateMs;
     }
 
     /**

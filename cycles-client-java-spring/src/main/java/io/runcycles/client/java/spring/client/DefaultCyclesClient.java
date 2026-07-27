@@ -9,6 +9,9 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.lang.reflect.Method;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Map;
 
 /**
@@ -154,7 +157,9 @@ public class DefaultCyclesClient implements CyclesClient {
                         .map(responseBody -> {
                             int status = response.statusCode().value();
                             if (response.statusCode().is2xxSuccessful()) {
-                                return CyclesResponse.success(status, responseBody);
+                                Long dateMs = parseDateMs(
+                                        response.headers().asHttpHeaders().getFirst("Date"));
+                                return CyclesResponse.success(status, responseBody, dateMs);
                             }
                             // Use structured ErrorResponse parsing for consistent error extraction
                             ErrorResponse errorResponse = ErrorResponse.fromMap(responseBody);
@@ -194,6 +199,24 @@ public class DefaultCyclesClient implements CyclesClient {
             long ms = seconds >= MAX_RETRY_AFTER_MS / 1000 ? MAX_RETRY_AFTER_MS : seconds * 1000L;
             return (int) ms;
         } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Parses an RFC 1123 {@code Date} response header into epoch milliseconds.
+     * Absent or malformed values return {@code null} — callers fall back to
+     * behavior that does not depend on the server timestamp.
+     */
+    private static Long parseDateMs(String headerValue) {
+        if (headerValue == null) {
+            return null;
+        }
+        try {
+            return ZonedDateTime.parse(headerValue.trim(), DateTimeFormatter.RFC_1123_DATE_TIME)
+                    .toInstant().toEpochMilli();
+        } catch (DateTimeParseException e) {
+            LOG.debug("Ignoring unparseable Date response header: {}", headerValue);
             return null;
         }
     }

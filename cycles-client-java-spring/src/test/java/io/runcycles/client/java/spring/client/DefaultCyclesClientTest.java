@@ -172,6 +172,53 @@ class DefaultCyclesClientTest {
         }
 
         @Test
+        void shouldCaptureDateHeaderAsEpochMillisOnSuccess() throws Exception {
+            String httpDate = "Wed, 21 Oct 2026 07:28:00 GMT";
+            server.enqueue(new MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setHeader("Date", httpDate)
+                    .setBody(mapper.writeValueAsString(Map.of(
+                            "decision", "ALLOW", "reservation_id", "res-1"))));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
+                    "idempotency_key", "idem-1"));
+
+            long expected = java.time.ZonedDateTime
+                    .parse(httpDate, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME)
+                    .toInstant().toEpochMilli();
+            assertThat(resp.is2xx()).isTrue();
+            assertThat(resp.getDateMs()).isEqualTo(expected);
+        }
+
+        @Test
+        void shouldReturnNullDateMsWhenDateHeaderAbsent() throws Exception {
+            enqueueJson(200, Map.of("decision", "ALLOW", "reservation_id", "res-1"));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
+                    "idempotency_key", "idem-1"));
+
+            assertThat(resp.is2xx()).isTrue();
+            assertThat(resp.getDateMs()).isNull();
+        }
+
+        @Test
+        void shouldReturnNullDateMsWhenDateHeaderGarbage() throws Exception {
+            server.enqueue(new MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setHeader("Date", "not-a-date")
+                    .setBody(mapper.writeValueAsString(Map.of(
+                            "decision", "ALLOW", "reservation_id", "res-1"))));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
+                    "idempotency_key", "idem-1"));
+
+            assertThat(resp.is2xx()).isTrue();
+            assertThat(resp.getDateMs()).isNull();
+        }
+
+        @Test
         void shouldClampModeratelyLargeRetryAfterHeaderToOneHour() throws Exception {
             // 7200s (2h) parses fine but still exceeds the 1h cap
             server.enqueue(new MockResponse()

@@ -198,7 +198,8 @@ public class CyclesLifecycleService {
                 affectedScopes, scopePath, reserved, balances);
         CyclesContextHolder.set(ctx);
 
-        ScheduledFuture<?> heartbeatFuture = scheduleHeartbeat(reservationId, cycles.ttlMs(), expiresAtMs, ctx);
+        ScheduledFuture<?> heartbeatFuture = scheduleHeartbeat(
+                reservationId, cycles.ttlMs(), expiresAtMs, reservationResponse.getDateMs(), ctx);
 
         try {
             // Execute guarded action
@@ -370,15 +371,27 @@ public class CyclesLifecycleService {
     // -------------------------
     // Heartbeat
     // -------------------------
-    private ScheduledFuture<?> scheduleHeartbeat(String reservationId, long ttlMs,
-                                                  Long expiresAtMs, CyclesReservationContext ctx) {
-        if (expiresAtMs == null || ttlMs <= 0) {
+    private ScheduledFuture<?> scheduleHeartbeat(String reservationId, long requestedTtlMs,
+                                                  Long expiresAtMs, Long serverDateMs,
+                                                  CyclesReservationContext ctx) {
+        if (expiresAtMs == null || requestedTtlMs <= 0) {
             return null;
         }
+        // Tenant policy max_reservation_ttl_ms silently CAPS the granted TTL at reserve
+        // time (governance default 1 hour) and the create response has no effective-TTL
+        // field. Seeding the beat from the requested ttl would schedule the first tick far
+        // too late (a 24h request capped to 1h would first beat at 12h — long after
+        // expiry). Recover the effective TTL from the reserve response itself:
+        // expires_at_ms − Date header, BOTH server-frame timestamps, so the difference is
+        // clock-skew-free. Clamp to [1000, requestedTtl] to defuse a mangled Date header.
+        final long ttlMs = serverDateMs != null
+                ? Math.max(1000L, Math.min(expiresAtMs - serverDateMs, requestedTtlMs))
+                : requestedTtlMs;
         // No floor: spec ttl_ms minimum is 1000, so the interval is at least 500ms. A floor
         // above ttl/2 would guarantee a lapse for small TTLs (tick after expiry).
         long intervalMs = ttlMs / 2;
-        LOG.debug("Scheduling heartbeat: reservationId={}, intervalMs={}", reservationId, intervalMs);
+        LOG.debug("Scheduling heartbeat: reservationId={}, effectiveTtlMs={}, intervalMs={}",
+                reservationId, ttlMs, intervalMs);
         // Lead-estimate extension: extend_by_ms is relative to the CURRENT expires_at_ms,
         // so extending ttlMs on every ttl/2 tick would drift expiry ahead by +ttl/2 per beat
         // (a zombie budget lockup if the process dies) and burn the server's capped
@@ -395,8 +408,9 @@ public class CyclesLifecycleService {
         //
         // Failure handling: a failed extend keeps its idempotency key and retries it on the
         // next tick, so a lost response can never double-extend. Permanent failures
-        // (410/RESERVATION_EXPIRED, RESERVATION_FINALIZED, MAX_EXTENSIONS_EXCEEDED) stop the
-        // heartbeat for good — no amount of retrying can revive those.
+        // (410/RESERVATION_EXPIRED, RESERVATION_FINALIZED, MAX_EXTENSIONS_EXCEEDED,
+        // TENANT_CLOSED, NOT_FOUND) stop the heartbeat for good — all irreversible; no
+        // amount of retrying can revive those.
         final long initialExpiry = expiresAtMs;
         final long anchorNanos = nanoClock.getAsLong();
         AtomicLong knownExpiry = new AtomicLong(initialExpiry);
@@ -447,7 +461,9 @@ public class CyclesLifecycleService {
                     if (extendResponse.getStatus() == 410
                             || errorCode == ErrorCode.RESERVATION_EXPIRED
                             || errorCode == ErrorCode.RESERVATION_FINALIZED
-                            || errorCode == ErrorCode.MAX_EXTENSIONS_EXCEEDED) {
+                            || errorCode == ErrorCode.MAX_EXTENSIONS_EXCEEDED
+                            || errorCode == ErrorCode.TENANT_CLOSED
+                            || errorCode == ErrorCode.NOT_FOUND) {
                         stopped.set(true);
                         LOG.warn("Heartbeat extend failed permanently, stopping heartbeat: "
                                 + "reservationId={}, status={}, errorCode={}",

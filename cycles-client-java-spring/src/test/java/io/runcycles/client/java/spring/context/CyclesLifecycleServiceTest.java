@@ -1592,11 +1592,21 @@ class CyclesLifecycleServiceTest {
 
         /** Common stubs for ttl=20000 heartbeat scenarios (extend responses stubbed per test). */
         private void stubHeartbeatLifecycle(String reservationId, long initialExpiry) {
+            stubHeartbeatLifecycle(reservationId, initialExpiry, null);
+        }
+
+        /**
+         * Same, but the create response also carries the server {@code Date} header
+         * (epoch ms) so tests can exercise the effective-TTL recovery when a tenant
+         * policy silently caps the granted TTL below the requested one.
+         */
+        private void stubHeartbeatLifecycle(String reservationId, long initialExpiry, Long dateMs) {
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
             when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200, allowResponseWithExpiry(reservationId, initialExpiry)));
+                    .thenReturn(CyclesResponse.success(200,
+                            allowResponseWithExpiry(reservationId, initialExpiry), dateMs));
             when(requestBuilderService.buildExtend(eq(20000L), isNull()))
                     .thenReturn(Map.of("idempotency_key", "ext-template", "extend_by_ms", 20000L));
             when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
@@ -1944,6 +1954,170 @@ class CyclesLifecycleServiceTest {
 
             verify(client, times(2)).extendReservation(eq("res-noexp"), any(Object.class));
             assertThat(capturedCtx.get().getExpiresAtMs()).isEqualTo(initialExpiry + 40000L);
+        }
+
+        @Test
+        void shouldDeriveEffectiveTtlFromDateHeaderWhenPolicyCapsGrant() throws Throwable {
+            // Tenant policy max_reservation_ttl_ms silently caps the granted TTL at
+            // reserve. The client recovers it as expires_at_ms - Date (both server-frame,
+            // clock-skew-free): requested ttl 20000, granted only 4000 -> the heartbeat
+            // must run entirely off 4000 (interval 2000, extend_by_ms 4000, thresholds).
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            long serverDate = initialExpiry - 4000L; // granted TTL = 4000ms
+            AtomicLong serverExpiry = new AtomicLong(initialExpiry);
+            stubHeartbeatLifecycle("res-capped", initialExpiry, serverDate);
+            when(requestBuilderService.buildExtend(eq(4000L), isNull()))
+                    .thenReturn(Map.of("idempotency_key", "ext-template", "extend_by_ms", 4000L));
+            when(client.extendReservation(eq("res-capped"), any(Object.class)))
+                    .thenAnswer(inv -> CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", serverExpiry.addAndGet(4000L))));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable tick = capturedHeartbeat.get();
+                        advanceClockMs(2000);
+                        tick.run(); // tick 1: lead 2000 -> extend by 4000
+                        advanceClockMs(2000);
+                        tick.run(); // tick 2: lead 4000 -> extend
+                        advanceClockMs(2000);
+                        tick.run(); // tick 3: lead 6000 >= 1.5*effTtl -> skip
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            // interval = effectiveTtl/2 = 2000ms, NOT requested/2 = 10000ms
+            verify(heartbeatExecutor).scheduleAtFixedRate(
+                    any(Runnable.class), eq(2000L), eq(2000L), eq(TimeUnit.MILLISECONDS));
+            verify(client, times(2)).extendReservation(eq("res-capped"), any(Object.class));
+            // extend amount is the effective TTL
+            verify(requestBuilderService, times(2)).buildExtend(eq(4000L), isNull());
+            verify(requestBuilderService, never()).buildExtend(eq(20000L), isNull());
+        }
+
+        @Test
+        void shouldClampEffectiveTtlToRequestedWhenDateSuggestsMore() throws Throwable {
+            // A Date earlier than expected (proxy caching, slow response) must never
+            // stretch the effective TTL beyond what was requested.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycle("res-over", initialExpiry, initialExpiry - 50_000L);
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            // clamp(50000, 1000, 20000) = 20000 -> interval 10000
+            verify(heartbeatExecutor).scheduleAtFixedRate(
+                    any(Runnable.class), eq(10000L), eq(10000L), eq(TimeUnit.MILLISECONDS));
+        }
+
+        @Test
+        void shouldClampEffectiveTtlToSpecMinimumOnMangledDate() throws Throwable {
+            // A mangled/hostile Date implying a sub-second grant is clamped to the spec
+            // ttl minimum (1000ms) so the interval can never collapse to zero.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycle("res-under", initialExpiry, initialExpiry - 400L);
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            // clamp(400, 1000, 20000) = 1000 -> interval 500
+            verify(heartbeatExecutor).scheduleAtFixedRate(
+                    any(Runnable.class), eq(500L), eq(500L), eq(TimeUnit.MILLISECONDS));
+        }
+
+        @Test
+        void shouldStopPermanentlyOnTenantClosed() throws Throwable {
+            // TENANT_CLOSED is a terminal 409 no retry can resolve.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            stubHeartbeatLifecycle("res-tclosed", 1_000_000L);
+            when(client.extendReservation(eq("res-tclosed"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(409, "Tenant closed",
+                            Map.of("error", "TENANT_CLOSED", "message", "Tenant closed", "request_id", "r1")));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable tick = capturedHeartbeat.get();
+                        advanceClockMs(10000);
+                        tick.run(); // tick 1: TENANT_CLOSED -> stop
+                        advanceClockMs(10000);
+                        tick.run(); // tick 2: stopped -> no call
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, times(1)).extendReservation(eq("res-tclosed"), any(Object.class));
+        }
+
+        @Test
+        void shouldStopPermanentlyOnNotFound() throws Throwable {
+            // NOT_FOUND: the reservation does not exist on this server — irreversible.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            stubHeartbeatLifecycle("res-notfound", 1_000_000L);
+            when(client.extendReservation(eq("res-notfound"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(404, "Not found",
+                            Map.of("error", "NOT_FOUND", "message", "Not found", "request_id", "r1")));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable tick = capturedHeartbeat.get();
+                        advanceClockMs(10000);
+                        tick.run(); // tick 1: NOT_FOUND -> stop
+                        advanceClockMs(10000);
+                        tick.run(); // tick 2: stopped -> no call
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, times(1)).extendReservation(eq("res-notfound"), any(Object.class));
         }
     }
 
