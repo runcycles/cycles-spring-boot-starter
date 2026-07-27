@@ -7,6 +7,7 @@ import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -226,8 +227,11 @@ public class CommitJournal {
     private static void atomicMove(Path source, Path target) throws IOException {
         try {
             Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException e) {
-            // Some file systems cannot replace atomically; fall back to a plain replace.
+        } catch (AtomicMoveNotSupportedException e) {
+            // Some file systems cannot replace atomically; fall back to a plain
+            // replace. Any other IOException (permissions, blocked target, ...)
+            // propagates to the caller's failure handling — retrying it
+            // non-atomically could mask a real fault or publish partial state.
             Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }

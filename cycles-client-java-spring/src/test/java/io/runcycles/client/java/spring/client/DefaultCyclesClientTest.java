@@ -136,6 +136,56 @@ class DefaultCyclesClientTest {
             assertThat(resp.getStatus()).isEqualTo(429);
             assertThat(resp.getRetryAfterMs()).isNull();
         }
+
+        @Test
+        void shouldRejectNegativeRetryAfterHeader() throws Exception {
+            server.enqueue(new MockResponse()
+                    .setResponseCode(429)
+                    .setHeader("Content-Type", "application/json")
+                    .setHeader("Retry-After", "-5")
+                    .setBody(mapper.writeValueAsString(Map.of(
+                            "error", "LIMIT_EXCEEDED", "message", "Rate limited", "request_id", "req-1"))));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
+                    "idempotency_key", "idem-1"));
+
+            assertThat(resp.getStatus()).isEqualTo(429);
+            assertThat(resp.getRetryAfterMs()).isNull();
+        }
+
+        @Test
+        void shouldClampRetryAfterHeaderToOneHour() throws Exception {
+            // 999999999999 seconds would overflow int millis; the parsed value is
+            // clamped to 1h (3_600_000 ms) instead of overflowing or being trusted.
+            server.enqueue(new MockResponse()
+                    .setResponseCode(429)
+                    .setHeader("Content-Type", "application/json")
+                    .setHeader("Retry-After", "999999999999")
+                    .setBody(mapper.writeValueAsString(Map.of(
+                            "error", "LIMIT_EXCEEDED", "message", "Rate limited", "request_id", "req-1"))));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
+                    "idempotency_key", "idem-1"));
+
+            assertThat(resp.getStatus()).isEqualTo(429);
+            assertThat(resp.getRetryAfterMs()).isEqualTo(3_600_000);
+        }
+
+        @Test
+        void shouldClampModeratelyLargeRetryAfterHeaderToOneHour() throws Exception {
+            // 7200s (2h) parses fine but still exceeds the 1h cap
+            server.enqueue(new MockResponse()
+                    .setResponseCode(429)
+                    .setHeader("Content-Type", "application/json")
+                    .setHeader("Retry-After", "7200")
+                    .setBody(mapper.writeValueAsString(Map.of(
+                            "error", "LIMIT_EXCEEDED", "message", "Rate limited", "request_id", "req-1"))));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
+                    "idempotency_key", "idem-1"));
+
+            assertThat(resp.getRetryAfterMs()).isEqualTo(3_600_000);
+        }
     }
 
     @Nested

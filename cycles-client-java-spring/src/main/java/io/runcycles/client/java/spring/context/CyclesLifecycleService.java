@@ -295,7 +295,10 @@ public class CyclesLifecycleService {
                     LOG.error("Commit got authentication failure (status={}); scheduling for replay: "
                             + "reservationId={}", commitResponse.getStatus(), reservationId);
                     retryEngine.schedule(reservationId, commitBody, eventFallbackBody, null);
-                } else if (commitErrorCode == ErrorCode.RESERVATION_EXPIRED) {
+                } else if (commitErrorCode == ErrorCode.RESERVATION_EXPIRED
+                        || commitResponse.getStatus() == 410) {
+                    // A bare 410 counts as expired even when the body is missing or
+                    // mangled — recover the spend, never release or discard it.
                     LOG.warn("Reservation expired before commit; recovering spend via POST /v1/events: "
                             + "reservationId={}", reservationId);
                     retryEngine.scheduleEvent(reservationId, eventFallbackBody);

@@ -1,5 +1,9 @@
 package io.runcycles.client.java.spring.retry;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.LoggerFactory;
+
 import java.time.Duration;
 import java.util.Map;
 
@@ -56,11 +60,29 @@ public interface CommitRetryEngine {
      * fallback. Retained for backward compatibility; prefer
      * {@link #schedule(String, Map, Map, Integer)}.
      *
+     * <p>Non-{@code Map} bodies (POJOs) are converted to a map via Jackson so the
+     * commit body is journaled and retried intact; only when conversion fails is
+     * {@code null} passed as a last resort (with an error log).
+     *
      * @param reservationId the reservation to commit
      * @param body          the commit request body
      */
     @SuppressWarnings("unchecked")
     default void schedule(String reservationId, Object body) {
-        schedule(reservationId, body instanceof Map ? (Map<String, Object>) body : null, null, null);
+        Map<String, Object> commitBody = null;
+        if (body instanceof Map) {
+            commitBody = (Map<String, Object>) body;
+        } else if (body != null) {
+            try {
+                commitBody = new ObjectMapper()
+                        .convertValue(body, new TypeReference<Map<String, Object>>() {});
+            } catch (IllegalArgumentException e) {
+                LoggerFactory.getLogger(CommitRetryEngine.class).error(
+                        "Could not convert commit body of type {} to a map; scheduling without a "
+                                + "body as last resort: reservationId={}",
+                        body.getClass().getName(), reservationId, e);
+            }
+        }
+        schedule(reservationId, commitBody, null, null);
     }
 }

@@ -1,5 +1,9 @@
 package io.runcycles.client.java.spring.retry;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import io.runcycles.client.java.spring.client.CyclesClient;
 import io.runcycles.client.java.spring.config.CyclesProperties;
 import io.runcycles.client.java.spring.journal.CommitJournal;
@@ -10,6 +14,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -143,6 +149,43 @@ class JournaledCommitRetryEngineTest {
         }
 
         @Test
+        void shouldRetainJournalOn4xxWithUnrecognizedErrorCode() {
+            // An error code this client version does not know maps to UNKNOWN — the
+            // engine cannot prove a genuine rejection, so the entry must survive.
+            when(client.commitReservation(eq("res-unk"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(422, "Rejected",
+                            Map.of("error", "SOME_FUTURE_CODE", "message", "Rejected", "request_id", "r1")));
+
+            JournaledCommitRetryEngine engine = new JournaledCommitRetryEngine(client, properties);
+            engine.schedule("res-unk", COMMIT_BODY, EVENT_FALLBACK, null);
+
+            await().atMost(3, TimeUnit.SECONDS)
+                    .untilAsserted(() -> verify(client, times(1)).commitReservation(eq("res-unk"), any(Object.class)));
+            // Terminal for this run — no more attempts, no event fallback, journal retained
+            await().during(300, TimeUnit.MILLISECONDS).atMost(2, TimeUnit.SECONDS)
+                    .untilAsserted(() -> verify(client, times(1)).commitReservation(eq("res-unk"), any(Object.class)));
+            assertThat(Files.exists(journalFile("res-unk"))).isTrue();
+            verify(client, never()).createEvent(any(Object.class));
+        }
+
+        @Test
+        void shouldRetainJournalOnCodeless4xx() {
+            // No error envelope at all (proxy-stripped body): same rule as UNKNOWN.
+            when(client.commitReservation(eq("res-nocode"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(400, "Bad request", Map.of()));
+
+            JournaledCommitRetryEngine engine = new JournaledCommitRetryEngine(client, properties);
+            engine.schedule("res-nocode", COMMIT_BODY, EVENT_FALLBACK, null);
+
+            await().atMost(3, TimeUnit.SECONDS)
+                    .untilAsserted(() -> verify(client, times(1)).commitReservation(eq("res-nocode"), any(Object.class)));
+            await().during(300, TimeUnit.MILLISECONDS).atMost(2, TimeUnit.SECONDS)
+                    .untilAsserted(() -> verify(client, times(1)).commitReservation(eq("res-nocode"), any(Object.class)));
+            assertThat(Files.exists(journalFile("res-nocode"))).isTrue();
+            verify(client, never()).createEvent(any(Object.class));
+        }
+
+        @Test
         void shouldRetainJournalOnAuthFailure() {
             when(client.commitReservation(eq("res-401"), any(Object.class)))
                     .thenReturn(CyclesResponse.httpError(401, "Unauthorized",
@@ -184,6 +227,41 @@ class JournaledCommitRetryEngineTest {
                 verify(client).createEvent(eq(EVENT_FALLBACK));
                 assertThat(Files.exists(journalFile("res-exp"))).isFalse();
             });
+        }
+
+        @Test
+        void shouldFlipToEventFallbackOnBodyless410() {
+            // A bare 410 with no error envelope still means expired: it must flip to
+            // the event fallback, never discard the spend record as a rejection.
+            when(client.commitReservation(eq("res-410"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(410, "Gone", Map.of()));
+            when(client.createEvent(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, Map.of("status", "RECORDED", "event_id", "ev-410")));
+
+            JournaledCommitRetryEngine engine = new JournaledCommitRetryEngine(client, properties);
+            engine.schedule("res-410", COMMIT_BODY, EVENT_FALLBACK, null);
+
+            await().atMost(3, TimeUnit.SECONDS).untilAsserted(() -> {
+                verify(client).commitReservation(eq("res-410"), any(Object.class));
+                verify(client).createEvent(eq(EVENT_FALLBACK));
+                assertThat(Files.exists(journalFile("res-410"))).isFalse();
+            });
+        }
+
+        @Test
+        void shouldRetainJournalWhenEventFallbackGets4xxWithoutRecognizedCode() {
+            when(client.createEvent(any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(400, "Bad event", Map.of()));
+
+            JournaledCommitRetryEngine engine = new JournaledCommitRetryEngine(client, properties);
+            engine.scheduleEvent("res-evunk", EVENT_FALLBACK);
+
+            await().atMost(3, TimeUnit.SECONDS)
+                    .untilAsserted(() -> verify(client, times(1)).createEvent(any(Object.class)));
+            // Terminal for this run, but the entry survives for a later replay
+            await().during(300, TimeUnit.MILLISECONDS).atMost(2, TimeUnit.SECONDS)
+                    .untilAsserted(() -> verify(client, times(1)).createEvent(any(Object.class)));
+            assertThat(Files.exists(journalFile("res-evunk"))).isTrue();
         }
 
         @Test
@@ -320,6 +398,41 @@ class JournaledCommitRetryEngineTest {
             await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> assertThat(callTimes).hasSize(1));
             // First attempt honors the 600ms Retry-After floor instead of the 50ms backoff
             assertThat(callTimes.get(0) - scheduledAt).isGreaterThanOrEqualTo(500L);
+        }
+
+        @Test
+        void shouldClampScheduledRetryAfterFloorToOneHour() throws Exception {
+            JournaledCommitRetryEngine engine = new JournaledCommitRetryEngine(client, properties);
+            long before = System.currentTimeMillis();
+            engine.schedule("res-clamp", COMMIT_BODY, EVENT_FALLBACK, Integer.MAX_VALUE);
+
+            // Journaled synchronously; the persisted floor is capped at now + 1h
+            PendingCommitRecord persisted = PendingCommitRecord.fromJson(
+                    Files.readString(journalFile("res-clamp")));
+            assertThat(persisted.getNotBeforeMs()).isNotNull()
+                    .isLessThanOrEqualTo(before + JournaledCommitRetryEngine.MAX_RETRY_AFTER_MS + 60_000);
+        }
+
+        @Test
+        void shouldClampRateLimitedRetryAfterFloorToOneHour() {
+            when(client.commitReservation(eq("res-429c"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(429, "Rate limited",
+                            Map.of("error", "LIMIT_EXCEEDED", "message", "Rate limited",
+                                    "request_id", "r1"), Integer.MAX_VALUE));
+
+            JournaledCommitRetryEngine engine = new JournaledCommitRetryEngine(client, properties);
+            engine.schedule("res-429c", COMMIT_BODY, EVENT_FALLBACK, null);
+
+            await().atMost(3, TimeUnit.SECONDS)
+                    .untilAsserted(() -> verify(client, times(1)).commitReservation(eq("res-429c"), any(Object.class)));
+            // The persisted not_before_ms floor from the 429's Retry-After is clamped
+            await().atMost(3, TimeUnit.SECONDS).untilAsserted(() -> {
+                PendingCommitRecord persisted = PendingCommitRecord.fromJson(
+                        Files.readString(journalFile("res-429c")));
+                assertThat(persisted.getNotBeforeMs()).isNotNull()
+                        .isLessThanOrEqualTo(System.currentTimeMillis()
+                                + JournaledCommitRetryEngine.MAX_RETRY_AFTER_MS + 60_000);
+            });
         }
     }
 
@@ -514,6 +627,23 @@ class JournaledCommitRetryEngineTest {
         }
 
         @Test
+        void shouldClampExcessivePersistedFloorOnReplay() throws Exception {
+            // A floor written by another tool may be arbitrarily far in the future;
+            // the restored delay is capped at 1h so a single bad record cannot park
+            // the retry for days. The capped delay is still beyond this test's
+            // window, so no attempt fires and the record survives untouched.
+            writeRecord(API_KEY, null, new PendingCommitRecord("res-far", BASE_URL,
+                    PendingCommitRecord.MODE_COMMIT, COMMIT_BODY, EVENT_FALLBACK,
+                    System.currentTimeMillis(), System.currentTimeMillis() + 90L * 24 * 3_600_000L));
+
+            new JournaledCommitRetryEngine(client, properties);
+            Thread.sleep(300);
+
+            verify(client, never()).commitReservation(anyString(), any(Object.class));
+            assertThat(Files.exists(journalFile("res-far"))).isTrue();
+        }
+
+        @Test
         void shouldFallBackToNormalBackoffWhenNotBeforeInThePast() {
             List<Long> callTimes = new CopyOnWriteArrayList<>();
             long replayStart = System.currentTimeMillis();
@@ -585,6 +715,52 @@ class JournaledCommitRetryEngineTest {
         }
 
         @Test
+        void shouldEscalateFlushTimeoutToErrorWhenJournalDisabled() {
+            properties.getJournal().setEnabled(false);
+            properties.getRetry().setInitialDelay(Duration.ofSeconds(30));
+            properties.getRetry().setMaxDelay(Duration.ofSeconds(30));
+            JournaledCommitRetryEngine engine = new JournaledCommitRetryEngine(client, properties);
+            engine.schedule("res-memflush", COMMIT_BODY, EVENT_FALLBACK, null);
+
+            Logger logger = (Logger) LoggerFactory.getLogger(JournaledCommitRetryEngine.class);
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.addAppender(appender);
+            try {
+                engine.flush(Duration.ofMillis(200));
+            } finally {
+                logger.detachAppender(appender);
+            }
+
+            // Memory-only mode still reports the timeout, escalated to ERROR because
+            // the in-flight retries are dropped for good.
+            assertThat(appender.list).anyMatch(event -> event.getLevel() == Level.ERROR
+                    && event.getFormattedMessage().contains("journal disabled"));
+        }
+
+        @Test
+        void shouldReleaseReplayClaimOnDestroySoSameJvmRestartCanReplay() {
+            properties.getRetry().setInitialDelay(Duration.ofSeconds(30));
+            properties.getRetry().setMaxDelay(Duration.ofSeconds(30));
+            properties.getRetry().setFlushTimeout(Duration.ofMillis(100));
+            JournaledCommitRetryEngine engineA = new JournaledCommitRetryEngine(client, properties);
+            engineA.schedule("res-claim", COMMIT_BODY, EVENT_FALLBACK, null);
+            engineA.destroy();
+            assertThat(Files.exists(journalFile("res-claim"))).isTrue();
+
+            when(client.commitReservation(eq("res-claim"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, Map.of("status", "COMMITTED")));
+
+            // Same JVM, same identity, NO claims reset: destroy released the claim,
+            // so a context restart resumes replay of the retained entry.
+            new JournaledCommitRetryEngine(client, newProperties(API_KEY, null));
+            await().atMost(3, TimeUnit.SECONDS).untilAsserted(() -> {
+                verify(client).commitReservation(eq("res-claim"), any(Object.class));
+                assertThat(Files.exists(journalFile("res-claim"))).isFalse();
+            });
+        }
+
+        @Test
         void shouldRetainJournalWhenScheduledAfterShutdown() {
             JournaledCommitRetryEngine engine = new JournaledCommitRetryEngine(client, properties);
             engine.flush(Duration.ofMillis(100));
@@ -614,6 +790,62 @@ class JournaledCommitRetryEngineTest {
 
             await().atMost(3, TimeUnit.SECONDS)
                     .untilAsserted(() -> verify(client).commitReservation(eq("res-legacy"), eq(COMMIT_BODY)));
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void shouldConvertPojoBodyAndJournalAndRetryIt() throws Exception {
+            // Slow the first attempt down so the synchronous journal write can be
+            // inspected race-free before the retry lands.
+            properties.getRetry().setInitialDelay(Duration.ofMillis(300));
+            when(client.commitReservation(eq("res-pojo"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, Map.of("status", "COMMITTED")));
+
+            CommitRetryEngine engine = new JournaledCommitRetryEngine(client, properties);
+            engine.schedule("res-pojo", new PojoCommitBody());
+
+            // Journaled synchronously with the Jackson-converted body, not null
+            PendingCommitRecord persisted = PendingCommitRecord.fromJson(
+                    Files.readString(journalFile("res-pojo")));
+            assertThat(persisted.getCommitBody())
+                    .containsEntry("idempotencyKey", "com-pojo")
+                    .containsKey("actual");
+
+            ArgumentCaptor<Object> bodyCaptor = ArgumentCaptor.forClass(Object.class);
+            await().atMost(3, TimeUnit.SECONDS).untilAsserted(() -> {
+                verify(client).commitReservation(eq("res-pojo"), bodyCaptor.capture());
+                assertThat(Files.exists(journalFile("res-pojo"))).isFalse();
+            });
+            assertThat(bodyCaptor.getValue()).isInstanceOf(Map.class);
+            assertThat((Map<String, Object>) bodyCaptor.getValue())
+                    .containsEntry("idempotencyKey", "com-pojo")
+                    .containsKey("actual");
+        }
+
+        @Test
+        void shouldScheduleWithNullBodyWhenPojoConversionFails() {
+            // java.lang.Object has no serializable properties: Jackson conversion
+            // fails and the engine schedules with a null body only as last resort.
+            // isNull(Object.class) disambiguates from the CommitRequest overload.
+            when(client.commitReservation(eq("res-obj"), isNull(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, Map.of("status", "COMMITTED")));
+
+            CommitRetryEngine engine = new JournaledCommitRetryEngine(client, properties);
+            engine.schedule("res-obj", new Object());
+
+            await().atMost(3, TimeUnit.SECONDS)
+                    .untilAsserted(() -> verify(client).commitReservation(eq("res-obj"), isNull(Object.class)));
+        }
+    }
+
+    /** POJO commit body for the deprecated two-arg schedule (Jackson-convertible getters). */
+    public static final class PojoCommitBody {
+        public String getIdempotencyKey() {
+            return "com-pojo";
+        }
+
+        public Map<String, Object> getActual() {
+            return Map.of("unit", "TOKENS", "amount", 5);
         }
     }
 }

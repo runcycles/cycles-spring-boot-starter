@@ -42,9 +42,14 @@ import java.util.concurrent.TimeUnit;
  *       {@code not_before_ms} so a restart mid-wait honors it.</li>
  *   <li>401/403 — terminal for this run but the journal entry is retained: fix
  *       credentials and restart to replay.</li>
- *   <li>{@code RESERVATION_EXPIRED} — flips to event mode and delivers the fallback
- *       immediately; without a fallback the entry is retained.</li>
- *   <li>other 4xx — genuine rejection; journal entry discarded.</li>
+ *   <li>{@code RESERVATION_EXPIRED} (or a bare 410, even bodyless) — flips to event
+ *       mode and delivers the fallback immediately; without a fallback the entry is
+ *       retained.</li>
+ *   <li>other 4xx with a recognized {@link ErrorCode} — genuine rejection; journal
+ *       entry discarded.</li>
+ *   <li>4xx without a recognized code (codeless or {@code UNKNOWN}) — terminal for
+ *       this run but the journal entry is retained: this client version cannot
+ *       prove it is a genuine rejection, so the spend record must survive.</li>
  *   <li>transport/5xx — keep retrying; on exhaustion the entry is retained for
  *       replay on the next run.</li>
  * </ul>
@@ -56,6 +61,11 @@ import java.util.concurrent.TimeUnit;
 public class JournaledCommitRetryEngine implements CommitRetryEngine, DisposableBean {
 
     private static final Logger LOG = LoggerFactory.getLogger(JournaledCommitRetryEngine.class);
+
+    // Upper bound on any server-requested Retry-After delay (1 hour). Caps hostile
+    // or mangled headers and persisted floors so a retry can never be parked for
+    // days by a single bad value.
+    static final long MAX_RETRY_AFTER_MS = 3_600_000L;
 
     // Journal replay must happen at most once per identity directory per JVM: the
     // first engine created for a (server, credential) identity claims its
@@ -141,8 +151,8 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
                 PendingCommitRecord.MODE_COMMIT);
         if (retryAfterMs != null) {
             // A rate-limited first attempt passes its Retry-After along so the first
-            // background retry honors the server's delay.
-            pending.retryAfterMs = retryAfterMs.longValue();
+            // background retry honors the server's delay (clamped to the 1h cap).
+            pending.retryAfterMs = Math.min(retryAfterMs.longValue(), MAX_RETRY_AFTER_MS);
         }
         submit(pending);
     }
@@ -166,9 +176,14 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
         executor.shutdown();
         long waitMs = Math.max(0, (timeout != null ? timeout : props.getFlushTimeout()).toMillis());
         try {
-            if (!executor.awaitTermination(waitMs, TimeUnit.MILLISECONDS) && journal != null) {
-                LOG.warn("Commit retry flush timed out after {}ms; unfinished work remains journaled "
-                        + "for replay on next run", waitMs);
+            if (!executor.awaitTermination(waitMs, TimeUnit.MILLISECONDS)) {
+                if (journal != null) {
+                    LOG.warn("Commit retry flush timed out after {}ms; unfinished work remains journaled "
+                            + "for replay on next run", waitMs);
+                } else {
+                    LOG.error("Commit retry flush timed out after {}ms; in-flight commit retries "
+                            + "dropped at shutdown — journal disabled", waitMs);
+                }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -178,6 +193,11 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
     @Override
     public void destroy() {
         flush(props.getFlushTimeout());
+        if (journal != null) {
+            // Release this engine's replay claim so a same-JVM context restart (a new
+            // engine for the same identity) can resume replaying retained entries.
+            REPLAYED_DIRS.remove(journal.getDirectory().toAbsolutePath().normalize());
+        }
     }
 
     // -------------------------
@@ -283,7 +303,9 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
         }
         if (response.is4xx()) {
             ErrorCode code = extractErrorCode(response);
-            if (code == ErrorCode.RESERVATION_EXPIRED) {
+            // A bare 410 counts as expired even when the body is missing or mangled:
+            // it must flip to the event fallback, never discard the spend record.
+            if (code == ErrorCode.RESERVATION_EXPIRED || response.getStatus() == 410) {
                 if (pending.eventFallbackBody != null && !pending.eventFallbackBody.isEmpty()) {
                     LOG.warn("Reservation expired before commit landed; falling back to POST /v1/events: "
                             + "reservationId={}", pending.reservationId);
@@ -294,6 +316,14 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
                 }
                 LOG.error("Reservation expired with no event fallback; spend is unrecorded "
                         + "(journal entry retained): reservationId={}", pending.reservationId);
+                return true;
+            }
+            if (code == null || code == ErrorCode.UNKNOWN) {
+                // Codeless or unrecognized 4xx: this client version cannot prove it is
+                // a genuine rejection, so keep the spend record for a later replay.
+                LOG.error("Commit retry got 4xx without a recognized error code (status={}); journal "
+                        + "entry retained for replay on next run: reservationId={}",
+                        response.getStatus(), pending.reservationId);
                 return true;
             }
             LOG.warn("Commit retry got non-retryable error: reservationId={}, status={}, error={}",
@@ -324,8 +354,17 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
             return true;
         }
         if (response.is4xx()) {
+            ErrorCode code = extractErrorCode(response);
+            if (code == null || code == ErrorCode.UNKNOWN) {
+                // Codeless or unrecognized 4xx: cannot prove a genuine rejection, so
+                // keep the spend record for a later replay.
+                LOG.error("Event fallback got 4xx without a recognized error code (status={}); journal "
+                        + "entry retained for replay on next run: reservationId={}",
+                        response.getStatus(), pending.reservationId);
+                return true;
+            }
             LOG.error("Event fallback rejected ({}); spend recovery failed: reservationId={}, status={}",
-                    extractErrorCode(response), pending.reservationId, response.getStatus());
+                    code, pending.reservationId, response.getStatus());
             journalDiscard(pending.reservationId);
             return true;
         }
@@ -341,7 +380,7 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
         }
         Integer retryAfterMs = response.getRetryAfterMs();
         if (retryAfterMs != null) {
-            pending.retryAfterMs = retryAfterMs.longValue();
+            pending.retryAfterMs = Math.min(retryAfterMs.longValue(), MAX_RETRY_AFTER_MS);
             // Persist the floor: a restart during a long Retry-After wait must not
             // replay into the window the server told us to avoid.
             journalRecord(pending);
@@ -411,10 +450,11 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
         for (PendingCommitRecord entry : entries) {
             Pending pending = new Pending(entry.getReservationId(), entry.getCommitBody(),
                     entry.getEventFallbackBody(), entry.getMode());
-            // Restore a persisted Retry-After floor as a relative delay; a floor
-            // already in the past falls back to normal backoff.
+            // Restore a persisted Retry-After floor as a relative delay (clamped to
+            // the 1h cap — records written by other tools may carry arbitrary
+            // floors); a floor already in the past falls back to normal backoff.
             if (entry.getNotBeforeMs() != null && entry.getNotBeforeMs() > now) {
-                pending.retryAfterMs = entry.getNotBeforeMs() - now;
+                pending.retryAfterMs = Math.min(entry.getNotBeforeMs() - now, MAX_RETRY_AFTER_MS);
             }
             scheduleNext(pending);
         }

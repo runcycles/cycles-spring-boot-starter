@@ -1567,6 +1567,36 @@ class CyclesLifecycleServiceTest {
             verify(retryEngine, never()).schedule(anyString(), any(), any(), any());
             verify(retryEngine).scheduleEvent(eq("res-expired"), anyMap());
         }
+
+        @Test
+        void shouldRecoverViaEventOnBodyless410() throws Throwable {
+            // A bare 410 with no error envelope (proxy-stripped body) still means
+            // expired: recover the spend via /v1/events, never release.
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-410-bare")));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(eq("res-410-bare"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(410, "Gone", Map.of()));
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, never()).releaseReservation(anyString(), any(Object.class));
+            verify(retryEngine, never()).schedule(anyString(), any(), any(), any());
+            verify(retryEngine).scheduleEvent(eq("res-410-bare"), anyMap());
+        }
     }
 
     // ========================================================================

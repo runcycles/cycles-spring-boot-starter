@@ -243,6 +243,24 @@ class CommitJournalTest {
         void discardShouldNotThrowForMissingEntry() {
             journal().discard("never-recorded");
         }
+
+        @Test
+        void recordShouldCleanUpTempFileWhenMoveFailsForNonAtomicityReason() throws IOException {
+            // Block the target path with a non-empty directory: the move fails with a
+            // plain IOException (not AtomicMoveNotSupportedException), which must
+            // propagate to record()'s failure handling — temp cleanup, no throw —
+            // rather than being retried non-atomically.
+            Path blockedTarget = dir.resolve("res-blk.json");
+            Files.createDirectory(blockedTarget);
+            Files.writeString(blockedTarget.resolve("child"), "occupied");
+
+            journal().record(commitRecord("res-blk", BASE_URL, null));
+
+            assertThat(Files.isDirectory(blockedTarget)).isTrue();
+            try (var stream = Files.list(dir)) {
+                assertThat(stream.filter(p -> p.getFileName().toString().endsWith(".tmp"))).isEmpty();
+            }
+        }
     }
 
     // ========================================================================
