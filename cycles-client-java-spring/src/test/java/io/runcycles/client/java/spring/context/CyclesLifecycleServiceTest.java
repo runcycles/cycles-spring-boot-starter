@@ -19,6 +19,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1191,6 +1192,32 @@ class CyclesLifecycleServiceTest {
     @DisplayName("Heartbeat scheduling and cancellation")
     class Heartbeat {
 
+        // Deterministic monotonic clock for lead-estimate heartbeat tests. The service
+        // reads it via the visible-for-testing LongSupplier constructor parameter.
+        private final AtomicLong nanoClock = new AtomicLong(0);
+
+        /** Replaces the shared service with one driven by the deterministic clock. */
+        private void useClockedService() {
+            service = new CyclesLifecycleService(
+                    client, retryEngine, requestBuilderService, evaluator, heartbeatExecutor, nanoClock::get);
+        }
+
+        private void advanceClockMs(long ms) {
+            nanoClock.addAndGet(ms * 1_000_000L);
+        }
+
+        /** Reservation response with a fixed server-frame expiry (no client wall clock). */
+        private Map<String, Object> allowResponseWithExpiry(String reservationId, long expiresAtMs) {
+            Map<String, Object> body = allowResponse(reservationId);
+            body.put("expires_at_ms", expiresAtMs);
+            return body;
+        }
+
+        @SuppressWarnings("unchecked")
+        private String idempotencyKeyOf(Object body) {
+            return String.valueOf(((Map<String, Object>) body).get("idempotency_key"));
+        }
+
         @Test
         void shouldScheduleHeartbeatWithCorrectInterval() throws Throwable {
             Cycles cycles = mockCycles(false);
@@ -1221,32 +1248,60 @@ class CyclesLifecycleServiceTest {
         }
 
         @Test
-        void shouldUseMinimumIntervalOf1000ms() throws Throwable {
+        void shouldUseHalfTtlIntervalWithNoFloorForSmallTtl() throws Throwable {
+            // ttl=1200: the old 1000ms floor would tick AFTER only 200ms of lifetime were
+            // left on alternate skipped beats — a guaranteed lapse. Interval must be ttl/2.
+            useClockedService();
             Cycles cycles = mockCycles(false);
-            when(cycles.ttlMs()).thenReturn(1000L); // ttl/2 = 500, clamped to 1000
+            when(cycles.ttlMs()).thenReturn(1200L);
             Method method = dummyMethod();
             Object[] args = {100};
             Object target = CyclesLifecycleServiceTest.this;
 
+            AtomicReference<Runnable> capturedHeartbeat = new AtomicReference<>();
+            when(heartbeatExecutor.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
+                    .thenAnswer(invocation -> {
+                        capturedHeartbeat.set(invocation.getArgument(0));
+                        return mock(ScheduledFuture.class);
+                    });
+
+            long initialExpiry = 1_000_000L;
+            AtomicLong serverExpiry = new AtomicLong(initialExpiry);
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
             when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200, allowResponse("res-hb-min")));
+                    .thenReturn(CyclesResponse.success(200, allowResponseWithExpiry("res-hb-small", initialExpiry)));
+            when(requestBuilderService.buildExtend(eq(1200L), isNull()))
+                    .thenReturn(Map.of("idempotency_key", "ext-template", "extend_by_ms", 1200L));
+            when(client.extendReservation(eq("res-hb-small"), any(Object.class)))
+                    .thenAnswer(inv -> CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", serverExpiry.addAndGet(1200L))));
             when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "com-1"));
             when(client.commitReservation(anyString(), any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
 
             service.executeWithReservation(
-                    () -> "ok",
+                    () -> {
+                        Runnable tick = capturedHeartbeat.get();
+                        advanceClockMs(600);  // tick 1: lead 600 -> extend
+                        tick.run();
+                        advanceClockMs(600);  // tick 2: lead 1200 -> extend
+                        tick.run();
+                        advanceClockMs(600);  // tick 3: lead 1800 >= 1.5*ttl -> skip
+                        tick.run();
+                        return "ok";
+                    },
                     cycles, method, args, target,
                     "llm", "complete"
             );
 
-            // Math.max(1000/2, 1000) = 1000ms
+            // interval = ttl/2 = 600ms, no floor
             verify(heartbeatExecutor).scheduleAtFixedRate(
-                    any(Runnable.class), eq(1000L), eq(1000L), eq(TimeUnit.MILLISECONDS));
+                    any(Runnable.class), eq(600L), eq(600L), eq(TimeUnit.MILLISECONDS));
+            // The lead stayed positive at every tick (600, 1200, 1800): no lapse window
+            verify(client, times(2)).extendReservation(eq("res-hb-small"), any(Object.class));
         }
 
         @Test
@@ -1419,8 +1474,13 @@ class CyclesLifecycleServiceTest {
                     "llm", "complete"
             );
 
-            // Verify extend was called
-            verify(client).extendReservation(eq("res-extend"), eq(extendBody));
+            // Verify extend was called with extend_by_ms = ttl and a per-attempt idempotency
+            // key (the service overwrites the builder's key so failed attempts can reuse it)
+            org.mockito.ArgumentCaptor<Object> extendBodyCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+            verify(client).extendReservation(eq("res-extend"), extendBodyCaptor.capture());
+            Map<?, ?> sentBody = (Map<?, ?>) extendBodyCaptor.getValue();
+            assertThat(((Number) sentBody.get("extend_by_ms")).longValue()).isEqualTo(20000L);
+            assertThat(sentBody.get("idempotency_key")).isNotNull();
             // Verify context expiresAtMs was updated
             assertThat(capturedCtx.get().getExpiresAtMs()).isEqualTo(newExpiresAtMs);
         }
@@ -1448,8 +1508,8 @@ class CyclesLifecycleServiceTest {
             when(requestBuilderService.buildExtend(anyLong(), isNull()))
                     .thenReturn(Map.of("idempotency_key", "ext-1", "extend_by_ms", 20000));
             when(client.extendReservation(eq("res-ext-fail"), any(Object.class)))
-                    .thenReturn(CyclesResponse.httpError(410, "Expired",
-                            Map.of("error", "RESERVATION_EXPIRED", "message", "Expired", "request_id", "r1")));
+                    .thenReturn(CyclesResponse.httpError(503, "Unavailable",
+                            Map.of("error", "INTERNAL_ERROR", "message", "Unavailable", "request_id", "r1")));
             when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "com-1"));
             when(client.commitReservation(anyString(), any(Object.class)))
@@ -1515,149 +1575,375 @@ class CyclesLifecycleServiceTest {
             assertThat(result).isEqualTo("ok");
         }
 
+        // Mock future returned by scheduleAtFixedRate, kept so tests can verify
+        // the heartbeat's self-cancellation on permanent failures.
+        private ScheduledFuture<?> heartbeatFuture;
+
+        private AtomicReference<Runnable> captureHeartbeat() {
+            heartbeatFuture = mock(ScheduledFuture.class);
+            AtomicReference<Runnable> captured = new AtomicReference<>();
+            when(heartbeatExecutor.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
+                    .thenAnswer(invocation -> {
+                        captured.set(invocation.getArgument(0));
+                        return heartbeatFuture;
+                    });
+            return captured;
+        }
+
+        /** Common stubs for ttl=20000 heartbeat scenarios (extend responses stubbed per test). */
+        private void stubHeartbeatLifecycle(String reservationId, long initialExpiry) {
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponseWithExpiry(reservationId, initialExpiry)));
+            when(requestBuilderService.buildExtend(eq(20000L), isNull()))
+                    .thenReturn(Map.of("idempotency_key", "ext-template", "extend_by_ms", 20000L));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(anyString(), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+        }
+
         @Test
-        void shouldExtendOnAlternateTicksOnly() throws Throwable {
-            // Alternate-beat extension: first tick extends, second tick skips (a successful
-            // extend already pushed expiry a full ttl out), third tick extends again.
+        void shouldFollowLeadEstimateBeatPattern() throws Throwable {
+            // Server grants a full ttl per extend, clock advances ttl/2 per tick.
+            // Lead per tick: 10000 -> extend, 20000 -> extend, 30000 (= 1.5*ttl) -> skip,
+            // 20000 -> extend.
+            useClockedService();
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
             Method method = dummyMethod();
             Object[] args = {100};
             Object target = CyclesLifecycleServiceTest.this;
 
-            AtomicReference<Runnable> capturedHeartbeat = new AtomicReference<>();
-            when(heartbeatExecutor.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
-                    .thenAnswer(invocation -> {
-                        capturedHeartbeat.set(invocation.getArgument(0));
-                        return mock(ScheduledFuture.class);
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            AtomicLong serverExpiry = new AtomicLong(initialExpiry);
+            java.util.concurrent.atomic.AtomicInteger extendCalls = new java.util.concurrent.atomic.AtomicInteger();
+            stubHeartbeatLifecycle("res-beat", initialExpiry);
+            when(client.extendReservation(eq("res-beat"), any(Object.class)))
+                    .thenAnswer(inv -> {
+                        extendCalls.incrementAndGet();
+                        return CyclesResponse.success(200,
+                                Map.of("status", "ACTIVE", "expires_at_ms", serverExpiry.addAndGet(20000L)));
                     });
-
-            // extend_by_ms stays ttlMs — relative to the CURRENT expires_at_ms per spec
-            Map<String, Object> extendBody = Map.of("idempotency_key", "ext-1", "extend_by_ms", 20000);
-            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
-                    .thenReturn(Map.of("idempotency_key", "idem-1"));
-            when(client.createReservation(any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200, allowResponse("res-alt")));
-            when(requestBuilderService.buildExtend(eq(20000L), isNull()))
-                    .thenReturn(extendBody);
-            when(client.extendReservation(eq("res-alt"), any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200,
-                            Map.of("status", "ACTIVE", "expires_at_ms", System.currentTimeMillis() + 40000)));
-            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
-                    .thenReturn(Map.of("idempotency_key", "com-1"));
-            when(client.commitReservation(anyString(), any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
 
             service.executeWithReservation(
                     () -> {
                         Runnable tick = capturedHeartbeat.get();
-                        tick.run(); // tick 1: extends
-                        tick.run(); // tick 2: skipped after successful extend
-                        tick.run(); // tick 3: extends again
+                        advanceClockMs(10000);
+                        tick.run(); // tick 1: lead 10000 -> extend
+                        assertThat(extendCalls.get()).isEqualTo(1);
+                        advanceClockMs(10000);
+                        tick.run(); // tick 2: lead 20000 -> extend
+                        assertThat(extendCalls.get()).isEqualTo(2);
+                        advanceClockMs(10000);
+                        tick.run(); // tick 3: lead 30000 >= 1.5*ttl -> skip, no HTTP call
+                        assertThat(extendCalls.get()).isEqualTo(2);
+                        advanceClockMs(10000);
+                        tick.run(); // tick 4: lead 20000 -> extend
+                        assertThat(extendCalls.get()).isEqualTo(3);
                         return "ok";
                     },
                     cycles, method, args, target,
                     "llm", "complete"
             );
 
-            verify(client, times(2)).extendReservation(eq("res-alt"), eq(extendBody));
-            verify(requestBuilderService, times(2)).buildExtend(eq(20000L), isNull());
+            verify(client, times(3)).extendReservation(eq("res-beat"), any(Object.class));
         }
 
         @Test
-        void shouldRetryOnNextTickAfterFailedExtend() throws Throwable {
-            // A failed extend must NOT consume the skip: tick 1 fails, tick 2 retries
-            // (succeeds), tick 3 is then skipped.
+        void shouldReuseIdempotencyKeyOnRetryThenRegenerateAfterSuccess() throws Throwable {
+            // A failed extend keeps its idempotency key so the retry replays the same
+            // request (a lost response must not double-extend); after a 2xx the next
+            // extend uses a fresh key.
+            useClockedService();
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
             Method method = dummyMethod();
             Object[] args = {100};
             Object target = CyclesLifecycleServiceTest.this;
 
-            AtomicReference<Runnable> capturedHeartbeat = new AtomicReference<>();
-            when(heartbeatExecutor.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
-                    .thenAnswer(invocation -> {
-                        capturedHeartbeat.set(invocation.getArgument(0));
-                        return mock(ScheduledFuture.class);
-                    });
-
-            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
-                    .thenReturn(Map.of("idempotency_key", "idem-1"));
-            when(client.createReservation(any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200, allowResponse("res-alt-fail")));
-            when(requestBuilderService.buildExtend(eq(20000L), isNull()))
-                    .thenReturn(Map.of("idempotency_key", "ext-1", "extend_by_ms", 20000));
-            when(client.extendReservation(eq("res-alt-fail"), any(Object.class)))
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycle("res-key", initialExpiry);
+            when(client.extendReservation(eq("res-key"), any(Object.class)))
                     .thenReturn(CyclesResponse.httpError(500, "Server error", Map.of()))
                     .thenReturn(CyclesResponse.success(200,
-                            Map.of("status", "ACTIVE", "expires_at_ms", System.currentTimeMillis() + 40000)));
-            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
-                    .thenReturn(Map.of("idempotency_key", "com-1"));
-            when(client.commitReservation(anyString(), any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+                            Map.of("status", "ACTIVE", "expires_at_ms", initialExpiry + 20000L)))
+                    .thenReturn(CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", initialExpiry + 40000L)));
 
             service.executeWithReservation(
                     () -> {
                         Runnable tick = capturedHeartbeat.get();
-                        tick.run(); // tick 1: extend attempt fails (5xx)
-                        tick.run(); // tick 2: retries immediately, succeeds
-                        tick.run(); // tick 3: skipped after the success
+                        advanceClockMs(10000);
+                        tick.run(); // tick 1: extend fails (5xx) -> key kept pending
+                        advanceClockMs(10000);
+                        tick.run(); // tick 2: lead 0 -> retry with the SAME key, succeeds
+                        advanceClockMs(10000);
+                        tick.run(); // tick 3: lead 10000 -> extend with a FRESH key
                         return "ok";
                     },
                     cycles, method, args, target,
                     "llm", "complete"
             );
 
-            verify(client, times(2)).extendReservation(eq("res-alt-fail"), any(Object.class));
+            org.mockito.ArgumentCaptor<Object> bodyCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+            verify(client, times(3)).extendReservation(eq("res-key"), bodyCaptor.capture());
+            String key1 = idempotencyKeyOf(bodyCaptor.getAllValues().get(0));
+            String key2 = idempotencyKeyOf(bodyCaptor.getAllValues().get(1));
+            String key3 = idempotencyKeyOf(bodyCaptor.getAllValues().get(2));
+            assertThat(key1).isNotEqualTo("ext-template"); // service key overrides the builder's
+            assertThat(key2).isEqualTo(key1);
+            assertThat(key3).isNotEqualTo(key1);
         }
 
         @Test
-        void shouldRetryOnNextTickAfterExtendException() throws Throwable {
-            // A thrown extend (transport error) also retries on the very next tick.
+        void shouldReuseIdempotencyKeyAfterExtendException() throws Throwable {
+            // A thrown extend (transport error) also keeps its key for the next tick.
+            useClockedService();
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
             Method method = dummyMethod();
             Object[] args = {100};
             Object target = CyclesLifecycleServiceTest.this;
 
-            AtomicReference<Runnable> capturedHeartbeat = new AtomicReference<>();
-            when(heartbeatExecutor.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
-                    .thenAnswer(invocation -> {
-                        capturedHeartbeat.set(invocation.getArgument(0));
-                        return mock(ScheduledFuture.class);
-                    });
-
-            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
-                    .thenReturn(Map.of("idempotency_key", "idem-1"));
-            when(client.createReservation(any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200, allowResponse("res-alt-exc")));
-            when(requestBuilderService.buildExtend(eq(20000L), isNull()))
-                    .thenReturn(Map.of("idempotency_key", "ext-1", "extend_by_ms", 20000));
-            when(client.extendReservation(eq("res-alt-exc"), any(Object.class)))
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycle("res-exc-key", initialExpiry);
+            when(client.extendReservation(eq("res-exc-key"), any(Object.class)))
                     .thenThrow(new RuntimeException("connection reset"))
                     .thenReturn(CyclesResponse.success(200,
-                            Map.of("status", "ACTIVE", "expires_at_ms", System.currentTimeMillis() + 40000)));
-            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
-                    .thenReturn(Map.of("idempotency_key", "com-1"));
-            when(client.commitReservation(anyString(), any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+                            Map.of("status", "ACTIVE", "expires_at_ms", initialExpiry + 20000L)));
 
             service.executeWithReservation(
                     () -> {
                         Runnable tick = capturedHeartbeat.get();
-                        tick.run(); // tick 1: extend throws
-                        tick.run(); // tick 2: retries immediately, succeeds
-                        tick.run(); // tick 3: skipped after the success
+                        advanceClockMs(10000);
+                        tick.run(); // tick 1: extend throws -> key kept pending
+                        advanceClockMs(10000);
+                        tick.run(); // tick 2: retries with the SAME key, succeeds
                         return "ok";
                     },
                     cycles, method, args, target,
                     "llm", "complete"
             );
 
-            verify(client, times(2)).extendReservation(eq("res-alt-exc"), any(Object.class));
+            org.mockito.ArgumentCaptor<Object> bodyCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+            verify(client, times(2)).extendReservation(eq("res-exc-key"), bodyCaptor.capture());
+            assertThat(idempotencyKeyOf(bodyCaptor.getAllValues().get(1)))
+                    .isEqualTo(idempotencyKeyOf(bodyCaptor.getAllValues().get(0)));
+        }
+
+        @Test
+        void shouldStopPermanentlyOnMaxExtensionsExceeded() throws Throwable {
+            // MAX_EXTENSIONS_EXCEEDED can never succeed on retry: the heartbeat cancels
+            // itself and later ticks make no HTTP calls.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            stubHeartbeatLifecycle("res-max", 1_000_000L);
+            when(client.extendReservation(eq("res-max"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(409, "Max extensions",
+                            Map.of("error", "MAX_EXTENSIONS_EXCEEDED", "message", "Max extensions", "request_id", "r1")));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable tick = capturedHeartbeat.get();
+                        advanceClockMs(10000);
+                        tick.run(); // tick 1: permanent failure -> stop + self-cancel
+                        // Self-cancellation happened inside the tick (the lifecycle's own
+                        // finally-cancel has not run yet at this point)
+                        verify(heartbeatFuture).cancel(false);
+                        advanceClockMs(10000);
+                        tick.run(); // tick 2: stopped -> no call
+                        advanceClockMs(10000);
+                        tick.run(); // tick 3: stopped -> no call
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, times(1)).extendReservation(eq("res-max"), any(Object.class));
+        }
+
+        @Test
+        void shouldStopPermanentlyOnBodyless410() throws Throwable {
+            // A bare 410 (proxy-stripped body) still means the reservation is gone.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            stubHeartbeatLifecycle("res-410", 1_000_000L);
+            when(client.extendReservation(eq("res-410"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(410, "Gone", Map.of()));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable tick = capturedHeartbeat.get();
+                        advanceClockMs(10000);
+                        tick.run(); // tick 1: 410 -> stop
+                        advanceClockMs(10000);
+                        tick.run(); // tick 2: stopped -> no call
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, times(1)).extendReservation(eq("res-410"), any(Object.class));
+        }
+
+        @Test
+        void shouldStopPermanentlyOnReservationFinalized() throws Throwable {
+            // RESERVATION_FINALIZED means committed/released elsewhere — nothing to keep alive.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            stubHeartbeatLifecycle("res-final", 1_000_000L);
+            when(client.extendReservation(eq("res-final"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(409, "Finalized",
+                            Map.of("error", "RESERVATION_FINALIZED", "message", "Finalized", "request_id", "r1")));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable tick = capturedHeartbeat.get();
+                        advanceClockMs(10000);
+                        tick.run(); // tick 1: RESERVATION_FINALIZED -> stop
+                        advanceClockMs(10000);
+                        tick.run(); // tick 2: stopped -> no call
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, times(1)).extendReservation(eq("res-final"), any(Object.class));
+        }
+
+        @Test
+        void shouldSkipCatchUpTickWithNoClockAdvance() throws Throwable {
+            // scheduleAtFixedRate fires queued catch-up ticks back-to-back after a slow
+            // extend. A zero-gap tick sees the lead unchanged-high and must skip — this is
+            // what makes the lead estimate immune to the catch-up double-extend.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycle("res-catchup", initialExpiry);
+            when(client.extendReservation(eq("res-catchup"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", initialExpiry + 20000L)));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable tick = capturedHeartbeat.get();
+                        advanceClockMs(10000);
+                        tick.run(); // tick 1: lead 10000 -> extend, lead becomes 30000
+                        tick.run(); // catch-up tick, ZERO clock advance: lead still 30000 -> skip
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, times(1)).extendReservation(eq("res-catchup"), any(Object.class));
+        }
+
+        @Test
+        void shouldExtendEveryTickWhenServerClampsGrant() throws Throwable {
+            // If the server clamps each grant to ttl/4, the lead never reaches 1.5*ttl,
+            // so every tick extends — the client keeps fighting for liveness.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            AtomicLong serverExpiry = new AtomicLong(initialExpiry);
+            stubHeartbeatLifecycle("res-clamp", initialExpiry);
+            when(client.extendReservation(eq("res-clamp"), any(Object.class)))
+                    .thenAnswer(inv -> CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", serverExpiry.addAndGet(5000L))));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable tick = capturedHeartbeat.get();
+                        advanceClockMs(10000);
+                        tick.run(); // lead 10000 -> extend (grant only +5000)
+                        advanceClockMs(10000);
+                        tick.run(); // lead 5000 -> extend
+                        advanceClockMs(10000);
+                        tick.run(); // lead 0 -> extend
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, times(3)).extendReservation(eq("res-clamp"), any(Object.class));
+        }
+
+        @Test
+        void shouldFallBackToPlusTtlWhenExpiryMissingFrom2xx() throws Throwable {
+            // Any 2xx counts as applied. When the body is missing or lacks expires_at_ms,
+            // the service assumes the conservative +ttl grant and keeps beating.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycle("res-noexp", initialExpiry);
+            when(client.extendReservation(eq("res-noexp"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, null))                       // no body at all
+                    .thenReturn(CyclesResponse.success(200, Map.of("status", "ACTIVE"))); // no expires_at_ms
+
+            AtomicReference<CyclesReservationContext> capturedCtx = new AtomicReference<>();
+            service.executeWithReservation(
+                    () -> {
+                        capturedCtx.set(CyclesContextHolder.get());
+                        Runnable tick = capturedHeartbeat.get();
+                        advanceClockMs(10000);
+                        tick.run(); // tick 1: 2xx, null body -> knownExpiry = initial + ttl
+                        advanceClockMs(10000);
+                        tick.run(); // tick 2: lead 20000 -> extend; 2xx missing expiry -> += ttl again
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, times(2)).extendReservation(eq("res-noexp"), any(Object.class));
+            assertThat(capturedCtx.get().getExpiresAtMs()).isEqualTo(initialExpiry + 40000L);
         }
     }
 

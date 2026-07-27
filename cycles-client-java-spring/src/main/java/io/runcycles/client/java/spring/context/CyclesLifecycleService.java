@@ -5,6 +5,7 @@ import io.runcycles.client.java.spring.client.CyclesClient;
 import io.runcycles.client.java.spring.evaluation.CyclesExpressionEvaluator;
 import io.runcycles.client.java.spring.model.*;
 import io.runcycles.client.java.spring.retry.CommitRetryEngine;
+import io.runcycles.client.java.spring.util.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,8 +13,12 @@ import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 
 /**
  * Orchestrates the Cycles reserve/execute/commit lifecycle.
@@ -28,6 +33,7 @@ public class CyclesLifecycleService {
     private final CyclesExpressionEvaluator evaluator;
     private final CyclesRequestBuilderService requestBuilderService;
     private final ScheduledExecutorService heartbeatExecutor;
+    private final LongSupplier nanoClock;
 
     /**
      * Creates a new lifecycle service with the given dependencies.
@@ -56,11 +62,22 @@ public class CyclesLifecycleService {
                            CyclesRequestBuilderService requestBuilderService,
                            CyclesExpressionEvaluator evaluator,
                            ScheduledExecutorService heartbeatExecutor) {
+        this(client, retryEngine, requestBuilderService, evaluator, heartbeatExecutor, System::nanoTime);
+    }
+
+    // Visible for testing — injectable monotonic clock for deterministic heartbeat tests
+    CyclesLifecycleService(CyclesClient client,
+                           CommitRetryEngine retryEngine,
+                           CyclesRequestBuilderService requestBuilderService,
+                           CyclesExpressionEvaluator evaluator,
+                           ScheduledExecutorService heartbeatExecutor,
+                           LongSupplier nanoClock) {
         this.client = client;
         this.retryEngine = retryEngine;
         this.requestBuilderService = requestBuilderService;
         this.evaluator = evaluator;
         this.heartbeatExecutor = heartbeatExecutor;
+        this.nanoClock = nanoClock;
     }
 
     /**
@@ -358,43 +375,100 @@ public class CyclesLifecycleService {
         if (expiresAtMs == null || ttlMs <= 0) {
             return null;
         }
-        long intervalMs = Math.max(ttlMs / 2, 1000);
+        // No floor: spec ttl_ms minimum is 1000, so the interval is at least 500ms. A floor
+        // above ttl/2 would guarantee a lapse for small TTLs (tick after expiry).
+        long intervalMs = ttlMs / 2;
         LOG.debug("Scheduling heartbeat: reservationId={}, intervalMs={}", reservationId, intervalMs);
-        // Alternate-beat extension: extend_by_ms is relative to the CURRENT expires_at_ms,
+        // Lead-estimate extension: extend_by_ms is relative to the CURRENT expires_at_ms,
         // so extending ttlMs on every ttl/2 tick would drift expiry ahead by +ttl/2 per beat
         // (a zombie budget lockup if the process dies) and burn the server's capped
-        // extension_count twice as fast as needed. Instead: extend on the first tick (only
-        // ttl/2 of lifetime remains then), then skip exactly one tick after each SUCCESSFUL
-        // extend; after a failed extend, try again on the very next tick. No client/server
-        // clock comparison — clock skew makes expires_at_ms arithmetic unsafe. Net effect:
-        // no drift, remaining lifetime oscillates in [ttl/2, 1.5*ttl], extension use halved.
-        AtomicBoolean skipNextTick = new AtomicBoolean(false);
-        return heartbeatExecutor.scheduleAtFixedRate(() -> {
-            if (skipNextTick.getAndSet(false)) {
-                LOG.debug("Skipping heartbeat tick after successful extend: reservationId={}", reservationId);
+        // extension_count twice as fast as needed. Each tick estimates how far expiry leads
+        // "now" and only extends when the lead has dropped below 1.5*ttl:
+        //
+        //   leadMs = (knownExpiry - initialExpiry) + ttlMs - elapsedMs
+        //
+        // This is clock-skew-free: (knownExpiry - initialExpiry) is a difference of two
+        // SERVER-frame timestamps and elapsedMs is a difference of two CLIENT-monotonic
+        // readings — the client's wall clock is never compared with the server's wall clock.
+        // scheduleAtFixedRate catch-up ticks self-correct: a zero-gap queued tick sees the
+        // lead unchanged-high and skips, so a slow extend can never double-extend.
+        //
+        // Failure handling: a failed extend keeps its idempotency key and retries it on the
+        // next tick, so a lost response can never double-extend. Permanent failures
+        // (410/RESERVATION_EXPIRED, RESERVATION_FINALIZED, MAX_EXTENSIONS_EXCEEDED) stop the
+        // heartbeat for good — no amount of retrying can revive those.
+        final long initialExpiry = expiresAtMs;
+        final long anchorNanos = nanoClock.getAsLong();
+        AtomicLong knownExpiry = new AtomicLong(initialExpiry);
+        AtomicReference<String> pendingKey = new AtomicReference<>();
+        AtomicReference<ScheduledFuture<?>> selfRef = new AtomicReference<>();
+        AtomicBoolean stopped = new AtomicBoolean(false);
+        ScheduledFuture<?> future = heartbeatExecutor.scheduleAtFixedRate(() -> {
+            if (stopped.get()) {
+                return;
+            }
+            long elapsedMs = (nanoClock.getAsLong() - anchorNanos) / 1_000_000L;
+            long leadMs = (knownExpiry.get() - initialExpiry) + ttlMs - elapsedMs;
+            if (leadMs >= ttlMs + ttlMs / 2) {
+                LOG.debug("Skipping heartbeat tick, expiry lead still ample: reservationId={}, leadMs={}",
+                        reservationId, leadMs);
                 return;
             }
             try {
-                LOG.debug("Sending heartbeat extend: reservationId={}", reservationId);
-                Map<String, Object> extendBody = requestBuilderService.buildExtend(ttlMs, null);
+                // Reuse the pending idempotency key after a failure so a lost response
+                // replays instead of double-extending; regenerate only after a 2xx.
+                String key = pendingKey.get();
+                if (key == null) {
+                    key = UUID.randomUUID().toString();
+                    pendingKey.set(key);
+                }
+                LOG.debug("Sending heartbeat extend: reservationId={}, leadMs={}", reservationId, leadMs);
+                // Copy so the reused key lands in the body; the client mirrors the body's
+                // idempotency_key into the X-Idempotency-Key header, keeping them consistent.
+                Map<String, Object> extendBody = new LinkedHashMap<>(requestBuilderService.buildExtend(ttlMs, null));
+                extendBody.put(Constants.IDEMPOTENCY_KEY, key);
                 CyclesResponse<Map<String, Object>> extendResponse = client.extendReservation(reservationId, extendBody);
                 if (extendResponse.is2xx()) {
-                    skipNextTick.set(true);
+                    pendingKey.set(null);
                     ExtendResult extResult = ExtendResult.fromMap(extendResponse.getBody());
-                    Long newExpiresAtMs = extResult != null ? extResult.getExpiresAtMs() : null;
-                    if (newExpiresAtMs != null) {
-                        ctx.updateExpiresAtMs(newExpiresAtMs);
+                    if (extResult == null || extResult.getStatus() != ExtendStatus.ACTIVE) {
+                        LOG.warn("Heartbeat extend returned 2xx with unexpected status, treating as applied: "
+                                + "reservationId={}, status={}", reservationId,
+                                extResult != null ? extResult.getStatus() : null);
                     }
+                    Long newExpiresAtMs = extResult != null ? extResult.getExpiresAtMs() : null;
+                    long resolvedExpiry = newExpiresAtMs != null ? newExpiresAtMs : knownExpiry.get() + ttlMs;
+                    knownExpiry.set(resolvedExpiry);
+                    ctx.updateExpiresAtMs(resolvedExpiry);
                     LOG.debug("Heartbeat extend successful: reservationId={}, newExpiresAtMs={}",
-                            reservationId, newExpiresAtMs);
+                            reservationId, resolvedExpiry);
                 } else {
-                    LOG.warn("Heartbeat extend failed: reservationId={}, status={}, error={}",
-                            reservationId, extendResponse.getStatus(), extendResponse.getErrorMessage());
+                    ErrorCode errorCode = extractErrorCode(extendResponse);
+                    if (extendResponse.getStatus() == 410
+                            || errorCode == ErrorCode.RESERVATION_EXPIRED
+                            || errorCode == ErrorCode.RESERVATION_FINALIZED
+                            || errorCode == ErrorCode.MAX_EXTENSIONS_EXCEEDED) {
+                        stopped.set(true);
+                        LOG.warn("Heartbeat extend failed permanently, stopping heartbeat: "
+                                + "reservationId={}, status={}, errorCode={}",
+                                reservationId, extendResponse.getStatus(), errorCode);
+                        ScheduledFuture<?> self = selfRef.get();
+                        if (self != null) {
+                            self.cancel(false);
+                        }
+                    } else {
+                        LOG.warn("Heartbeat extend failed, will retry next tick with the same idempotency key: "
+                                + "reservationId={}, status={}, error={}",
+                                reservationId, extendResponse.getStatus(), extendResponse.getErrorMessage());
+                    }
                 }
             } catch (Exception e) {
-                LOG.warn("Heartbeat extend error: reservationId={}", reservationId, e);
+                LOG.warn("Heartbeat extend error, will retry next tick with the same idempotency key: "
+                        + "reservationId={}", reservationId, e);
             }
         }, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+        selfRef.set(future);
+        return future;
     }
 
     private void cancelHeartbeat(ScheduledFuture<?> heartbeatFuture) {
