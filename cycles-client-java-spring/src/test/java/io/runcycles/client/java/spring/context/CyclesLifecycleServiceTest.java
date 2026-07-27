@@ -2125,6 +2125,77 @@ class CyclesLifecycleServiceTest {
         }
 
         @Test
+        void shouldExitHoldAfterPostSkipGrantMatchesDoubledGapOnce() throws Throwable {
+            // Sticky-misclassification regression (caught by the Rust port, fixed in
+            // Python): after a leadMin skip the next grant arrives across a DOUBLED gap,
+            // so a genuine grant-clamped server (+15000 per extend on a 60000 request,
+            // cadence grant/2 = 7500) shows grant == elapsed exactly once. An
+            // upper-bound-only test (grant <= 1.25*elapsed) would lock it into the
+            // 30s hold, where a 15000ms lease banks less than the 30000ms elapsed per
+            // cycle and decays to a lapse. The band's LOWER bound (grant >= 0.75*elapsed)
+            // lets the hold last at most one cycle: at the held cadence the ratio falls
+            // to 15000/30000 = 0.5, exits the band, and the cadence re-tightens.
+            //   beat 1 (t=0):    extend; grant 15000, elapsed 0     -> normal, delay 7500 (sum 15000)
+            //   beat 2 (7500):   leadMin  7500 < 22500 -> extend; ratio 2.0  -> normal   (sum 30000)
+            //   beat 3 (15000):  leadMin 15000 < 22500 -> extend; ratio 2.0  -> normal   (sum 45000)
+            //   beat 4 (22500):  leadMin 22500 >= 1.5*15000 -> skip
+            //   beat 5 (30000):  leadMin 15000 -> extend; elapsed 15000, ratio 1.0 -> HOLD 30000 (sum 60000)
+            //   beat 6 (60000):  leadMin 0 -> extend; elapsed 30000, ratio 0.5 -> re-tighten 7500 (sum 75000)
+            //   beat 7 (67500):  leadMin 7500 -> extend; ratio 2.0 -> normal (sum 90000)
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(60000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            AtomicLong serverExpiry = new AtomicLong(initialExpiry);
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponseWithExpiry("res-postskip", initialExpiry)));
+            when(requestBuilderService.buildExtend(eq(60000L), isNull()))
+                    .thenReturn(Map.of("idempotency_key", "ext-template", "extend_by_ms", 60000L));
+            when(client.extendReservation(eq("res-postskip"), any(Object.class)))
+                    .thenAnswer(inv -> CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", serverExpiry.addAndGet(15000L))));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(anyString(), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable beat = capturedHeartbeat.get();
+                        beat.run();             // beat 1: extend
+                        advanceClockMs(7500);
+                        beat.run();             // beat 2: extend
+                        advanceClockMs(7500);
+                        beat.run();             // beat 3: extend
+                        advanceClockMs(7500);
+                        beat.run();             // beat 4: skip
+                        advanceClockMs(7500);
+                        beat.run();             // beat 5: extend across the doubled gap -> one hold
+                        advanceClockMs(30000);
+                        beat.run();             // beat 6: extend at held cadence -> re-tightens
+                        advanceClockMs(7500);
+                        beat.run();             // beat 7: extend at normal cadence again
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            // 6 extends over 7 beats; the hold lasts exactly one cycle
+            verify(client, times(6)).extendReservation(eq("res-postskip"), any(Object.class));
+            assertThat(scheduledDelays).containsExactly(
+                    0L, 7500L, 7500L, 7500L, 7500L, 30000L, 7500L, 7500L);
+        }
+
+        @Test
         void shouldStopPermanentlyOnTenantClosed() throws Throwable {
             // TENANT_CLOSED is a terminal 409 no retry can resolve.
             useClockedService();

@@ -421,11 +421,20 @@ public class CyclesLifecycleService {
         // the cadence to the floor and burn the capped max_extensions in seconds.
         // Each success therefore compares the observed grant against the elapsed
         // time since the previous success (first: since heartbeat start): a
-        // non-positive grant, or one both well below the requested ttl (< 0.9×) and
-        // indistinguishable from elapsed (≤ 1.25×elapsed), marks the lead-clamp
-        // regime — the cadence HOLDS at min(requestedTtl/2, 30s), never tightens,
-        // and a single WARN flags the likely budget depletion. Real per-extend
-        // grants (e.g. a policy-capped but genuine lease) still tighten normally.
+        // non-positive grant, or one both well below the requested ttl (< 0.9×)
+        // and INSIDE the elapsed band (0.75×elapsed ≤ grant ≤ 1.25×elapsed), marks
+        // the lead-clamp regime — the cadence HOLDS at min(requestedTtl/2, 30s),
+        // never tightens, and a single WARN flags the likely budget depletion.
+        // Real per-extend grants (e.g. a policy-capped but genuine lease) still
+        // tighten normally. The band needs BOTH bounds: after a leadMin skip the
+        // next grant arrives across a doubled gap, so a genuine clamped grant can
+        // equal elapsed exactly (the cadence is grant/2) — an upper-bound-only
+        // test would stick that server in the hold, where a clamped lease banks
+        // less than elapsed per cycle and decays to a lapse. With the band, a
+        // post-skip real grant lands in the hold at most once; at the held cadence
+        // its grant/elapsed ratio falls to ~0.5, exits the band, and the cadence
+        // re-tightens. A genuine maximum-lead clamp tracks ANY gap (ratio ≈ 1),
+        // so it stays held.
         //
         // FAILURE HANDLING. A failed extend keeps its idempotency key and retries it on
         // the next beat (at the current delay), so a lost response can never
@@ -501,8 +510,11 @@ public class CyclesLifecycleService {
                             // Lead-clamp regime detection (see LEAD-CLAMP REGIME above):
                             // grant-derived cadence is only valid for real per-extend
                             // grants, never for elapsed-time echoes of a clamped lead.
+                            // Both band bounds matter — a post-skip real grant can equal
+                            // elapsed once, but only a clamped lead TRACKS elapsed.
                             boolean leadClamped = appliedGrant <= 0
                                     || (appliedGrant < requestedTtlMs * 9 / 10
+                                        && appliedGrant >= elapsedSinceSuccessMs * 3 / 4
                                         && appliedGrant <= elapsedSinceSuccessMs + elapsedSinceSuccessMs / 4);
                             if (leadClamped) {
                                 delayMs.set(heldCadenceMs);
