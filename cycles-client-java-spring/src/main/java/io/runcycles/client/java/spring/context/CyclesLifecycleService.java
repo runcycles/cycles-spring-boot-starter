@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Orchestrates the Cycles reserve/execute/commit lifecycle.
@@ -189,6 +190,7 @@ public class CyclesLifecycleService {
             LOG.debug("Guarded action finished: reservationId={}, methodElapsedMs={}", reservationId, methodElapsed);
 
             // Resolve actual amount
+            boolean actualFromEstimate = cycles.actual().isBlank() && cycles.useEstimateIfActualNotProvided();
             long actualAmount = resolveActualAmount(cycles, estimate, method, args, result, target);
 
             // Build and send commit
@@ -202,6 +204,16 @@ public class CyclesLifecycleService {
 
             Map<String, Object> commitMetadata = resolveCommitMetadata(
                     cycles, method, args, result, target, ctx.getCommitMetadata());
+            if (actualFromEstimate) {
+                // The commit records the estimate as measured spend — mark it so the
+                // server-side record is distinguishable from a genuinely measured actual.
+                Map<String, Object> marked = new LinkedHashMap<>();
+                if (commitMetadata != null) {
+                    marked.putAll(commitMetadata);
+                }
+                marked.put("actual_source", "estimate");
+                commitMetadata = marked;
+            }
             Map<String, Object> commitBody = requestBuilderService.buildCommit(
                     cycles, actualAmount, metrics, commitMetadata);
             Map<String, Object> eventFallbackBody = buildEventFallbackBody(
@@ -348,12 +360,26 @@ public class CyclesLifecycleService {
         }
         long intervalMs = Math.max(ttlMs / 2, 1000);
         LOG.debug("Scheduling heartbeat: reservationId={}, intervalMs={}", reservationId, intervalMs);
+        // Alternate-beat extension: extend_by_ms is relative to the CURRENT expires_at_ms,
+        // so extending ttlMs on every ttl/2 tick would drift expiry ahead by +ttl/2 per beat
+        // (a zombie budget lockup if the process dies) and burn the server's capped
+        // extension_count twice as fast as needed. Instead: extend on the first tick (only
+        // ttl/2 of lifetime remains then), then skip exactly one tick after each SUCCESSFUL
+        // extend; after a failed extend, try again on the very next tick. No client/server
+        // clock comparison — clock skew makes expires_at_ms arithmetic unsafe. Net effect:
+        // no drift, remaining lifetime oscillates in [ttl/2, 1.5*ttl], extension use halved.
+        AtomicBoolean skipNextTick = new AtomicBoolean(false);
         return heartbeatExecutor.scheduleAtFixedRate(() -> {
+            if (skipNextTick.getAndSet(false)) {
+                LOG.debug("Skipping heartbeat tick after successful extend: reservationId={}", reservationId);
+                return;
+            }
             try {
                 LOG.debug("Sending heartbeat extend: reservationId={}", reservationId);
                 Map<String, Object> extendBody = requestBuilderService.buildExtend(ttlMs, null);
                 CyclesResponse<Map<String, Object>> extendResponse = client.extendReservation(reservationId, extendBody);
                 if (extendResponse.is2xx()) {
+                    skipNextTick.set(true);
                     ExtendResult extResult = ExtendResult.fromMap(extendResponse.getBody());
                     Long newExpiresAtMs = extResult != null ? extResult.getExpiresAtMs() : null;
                     if (newExpiresAtMs != null) {
@@ -386,6 +412,8 @@ public class CyclesLifecycleService {
         if (!cycles.actual().isBlank()) {
             return evaluator.evaluate(cycles.actual(), method, args, result, target);
         } else if (cycles.useEstimateIfActualNotProvided()) {
+            LOG.debug("No actual expression provided; committing the estimate as actual "
+                    + "(marked with metadata actual_source=estimate): estimate={}", estimate);
             return estimate;
         } else {
             LOG.error("Actual usage amount is missing that is required");

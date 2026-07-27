@@ -1,5 +1,9 @@
 # Cycles Protocol v0.1.25 — Client (Spring Boot Starter) Audit
 
+## 2026-07-27 — Heartbeat drift fix + estimate-as-actual marker
+
+v0.3.1. Heartbeat now extends on alternate beats: `extend_by_ms` is relative to the current `expires_at_ms` per spec, so the old extend-every-`ttl/2`-tick loop drifted expiry `+ttl/2` per beat (zombie budget lockup on process death) and burned the server's capped `extension_count` twice as fast; a failed extend retries on the next tick, extend amount stays `ttl`. Separately, when the estimate is committed as actual (`useEstimateIfActualNotProvided` fallback), the commit metadata now carries `actual_source=estimate` (also flows into the `/v1/events` recovery body).
+
 ## 2026-07-27 — Durable commit retries (journal + /v1/events fallback)
 
 v0.3.0. Ports cycles-client-python PR #89's full three-round design (shipped in Python v0.5.0 and TypeScript v0.4.0) with a byte-compatible journal format and pinned cross-SDK `authFingerprint` vectors. Failed commits are journaled to `~/.runcycles/commit-journal/<fingerprint>/` before background retries start and replayed once per identity on the next JVM start by the new autoconfigured `JournaledCommitRetryEngine`; `RESERVATION_EXPIRED` now recovers spend via `POST /v1/events` instead of dropping it, 429 honors/persists `Retry-After`, 401/403 retains the journal and never releases. New `cycles.journal.*` and `cycles.retry.flush-timeout` properties. 504 tests pass; JaCoCo ≥95% INSTRUCTION gate met.

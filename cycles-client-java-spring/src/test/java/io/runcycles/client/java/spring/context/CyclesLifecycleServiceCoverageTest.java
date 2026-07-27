@@ -573,8 +573,10 @@ class CyclesLifecycleServiceCoverageTest {
                     },
                     cycles, method, new Object[]{100}, this, "llm", "complete");
 
-            // Verify the commit was called (metrics were included)
-            verify(requestBuilderService).buildCommit(eq(cycles), eq(1000L), any(CyclesMetrics.class), eq(Map.of("trace", "abc")));
+            // Verify the commit was called (metrics were included); the estimate-fallback
+            // marker is merged into the user-provided commit metadata
+            verify(requestBuilderService).buildCommit(eq(cycles), eq(1000L), any(CyclesMetrics.class),
+                    eq(Map.of("trace", "abc", "actual_source", "estimate")));
         }
     }
 }

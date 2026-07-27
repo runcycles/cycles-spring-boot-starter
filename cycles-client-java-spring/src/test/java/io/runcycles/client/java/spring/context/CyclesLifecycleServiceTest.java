@@ -147,7 +147,7 @@ class CyclesLifecycleServiceTest {
                     .thenReturn(Map.of("idempotency_key", "idem-1"));
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-1")));
-            when(requestBuilderService.buildCommit(eq(cycles), eq(1000L), any(), isNull()))
+            when(requestBuilderService.buildCommit(eq(cycles), eq(1000L), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "com-1"));
             when(client.commitReservation(eq("res-1"), any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
@@ -245,7 +245,9 @@ class CyclesLifecycleServiceTest {
             Map<String, Object> expectedMetadata = Map.of(
                     "request_id", "req-123",
                     "source", "context",
-                    "user", "alice");
+                    "user", "alice",
+                    // no actual expression + useEstimateIfActualNotProvided=true -> marker
+                    "actual_source", "estimate");
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
             when(evaluator.evaluateMap(eq(metadataExpression), eq(method), eq(args), eq("hello"), eq(target)))
@@ -303,8 +305,10 @@ class CyclesLifecycleServiceTest {
             );
 
             assertThat(result).isEqualTo("hello");
+            // Annotation metadata was skipped; only the estimate-fallback marker remains
             verify(requestBuilderService).buildCommit(
-                    eq(cycles), eq(1000L), any(CyclesMetrics.class), isNull());
+                    eq(cycles), eq(1000L), any(CyclesMetrics.class),
+                    eq(Map.of("actual_source", "estimate")));
         }
     }
 
@@ -973,6 +977,128 @@ class CyclesLifecycleServiceTest {
     }
 
     // ========================================================================
+    // Estimate-committed-as-actual marker
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Estimate-committed-as-actual marker")
+    class EstimateAsActualMarker {
+
+        @Test
+        void shouldMarkCommitMetadataWhenEstimateUsedAsActual() throws Throwable {
+            // actual is blank + useEstimateIfActualNotProvided=true -> the commit records
+            // the estimate as measured spend, so it must carry actual_source=estimate.
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-marker")));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(anyString(), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(requestBuilderService).buildCommit(
+                    eq(cycles), eq(1000L), any(CyclesMetrics.class),
+                    eq(Map.of("actual_source", "estimate")));
+        }
+
+        @Test
+        void shouldNotMarkCommitMetadataWhenExplicitActualProvided() throws Throwable {
+            // An explicit actual expression is a measured value — no marker, even with
+            // useEstimateIfActualNotProvided left at true (the fallback branch is not taken).
+            Cycles cycles = mockCycles(false);
+            when(cycles.actual()).thenReturn("#result.length()");
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(eq("1000"), eq(method), eq(args), isNull(), eq(target)))
+                    .thenReturn(1000L);
+            when(evaluator.evaluate(eq("#result.length()"), eq(method), eq(args), eq("hello"), eq(target)))
+                    .thenReturn(5L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-nomarker")));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(anyString(), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+
+            service.executeWithReservation(
+                    () -> "hello",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(requestBuilderService).buildCommit(
+                    eq(cycles), eq(5L), any(CyclesMetrics.class), isNull());
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void shouldCarryMarkerIntoEventFallbackBody() throws Throwable {
+            // The /v1/events fallback body copies the commit's metadata, so the marker
+            // must survive when an expired reservation flips the commit to an event.
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            Map<String, Object> subject = Map.of("tenant", "test-tenant");
+            Map<String, Object> action = Map.of("kind", "llm", "name", "complete");
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1", "subject", subject, "action", action));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-marker-fb")));
+            // Mirror the real builder: the metadata argument lands in the commit body
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenAnswer(invocation -> {
+                        Map<String, Object> body = new HashMap<>();
+                        body.put("idempotency_key", "com-1");
+                        body.put("actual", Map.of("unit", "TOKENS", "amount", 1000));
+                        Map<String, Object> metadata = invocation.getArgument(3);
+                        if (metadata != null) {
+                            body.put("metadata", metadata);
+                        }
+                        return body;
+                    });
+            when(client.commitReservation(eq("res-marker-fb"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(410, "Expired",
+                            Map.of("error", "RESERVATION_EXPIRED", "message", "Expired", "request_id", "r1")));
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            org.mockito.ArgumentCaptor<Map<String, Object>> fallbackCaptor =
+                    org.mockito.ArgumentCaptor.forClass(Map.class);
+            verify(retryEngine).scheduleEvent(eq("res-marker-fb"), fallbackCaptor.capture());
+
+            Map<String, Object> metadata = (Map<String, Object>) fallbackCaptor.getValue().get("metadata");
+            assertThat(metadata)
+                    .containsEntry("actual_source", "estimate")
+                    .containsEntry("recovered_reservation_id", "res-marker-fb")
+                    .containsEntry("recovery_reason", "commit_after_reservation_expired");
+        }
+    }
+
+    // ========================================================================
     // Null reservation ID
     // ========================================================================
 
@@ -1387,6 +1513,151 @@ class CyclesLifecycleServiceTest {
             );
 
             assertThat(result).isEqualTo("ok");
+        }
+
+        @Test
+        void shouldExtendOnAlternateTicksOnly() throws Throwable {
+            // Alternate-beat extension: first tick extends, second tick skips (a successful
+            // extend already pushed expiry a full ttl out), third tick extends again.
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = new AtomicReference<>();
+            when(heartbeatExecutor.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
+                    .thenAnswer(invocation -> {
+                        capturedHeartbeat.set(invocation.getArgument(0));
+                        return mock(ScheduledFuture.class);
+                    });
+
+            // extend_by_ms stays ttlMs — relative to the CURRENT expires_at_ms per spec
+            Map<String, Object> extendBody = Map.of("idempotency_key", "ext-1", "extend_by_ms", 20000);
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-alt")));
+            when(requestBuilderService.buildExtend(eq(20000L), isNull()))
+                    .thenReturn(extendBody);
+            when(client.extendReservation(eq("res-alt"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", System.currentTimeMillis() + 40000)));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(anyString(), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable tick = capturedHeartbeat.get();
+                        tick.run(); // tick 1: extends
+                        tick.run(); // tick 2: skipped after successful extend
+                        tick.run(); // tick 3: extends again
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, times(2)).extendReservation(eq("res-alt"), eq(extendBody));
+            verify(requestBuilderService, times(2)).buildExtend(eq(20000L), isNull());
+        }
+
+        @Test
+        void shouldRetryOnNextTickAfterFailedExtend() throws Throwable {
+            // A failed extend must NOT consume the skip: tick 1 fails, tick 2 retries
+            // (succeeds), tick 3 is then skipped.
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = new AtomicReference<>();
+            when(heartbeatExecutor.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
+                    .thenAnswer(invocation -> {
+                        capturedHeartbeat.set(invocation.getArgument(0));
+                        return mock(ScheduledFuture.class);
+                    });
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-alt-fail")));
+            when(requestBuilderService.buildExtend(eq(20000L), isNull()))
+                    .thenReturn(Map.of("idempotency_key", "ext-1", "extend_by_ms", 20000));
+            when(client.extendReservation(eq("res-alt-fail"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(500, "Server error", Map.of()))
+                    .thenReturn(CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", System.currentTimeMillis() + 40000)));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(anyString(), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable tick = capturedHeartbeat.get();
+                        tick.run(); // tick 1: extend attempt fails (5xx)
+                        tick.run(); // tick 2: retries immediately, succeeds
+                        tick.run(); // tick 3: skipped after the success
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, times(2)).extendReservation(eq("res-alt-fail"), any(Object.class));
+        }
+
+        @Test
+        void shouldRetryOnNextTickAfterExtendException() throws Throwable {
+            // A thrown extend (transport error) also retries on the very next tick.
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = new AtomicReference<>();
+            when(heartbeatExecutor.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
+                    .thenAnswer(invocation -> {
+                        capturedHeartbeat.set(invocation.getArgument(0));
+                        return mock(ScheduledFuture.class);
+                    });
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-alt-exc")));
+            when(requestBuilderService.buildExtend(eq(20000L), isNull()))
+                    .thenReturn(Map.of("idempotency_key", "ext-1", "extend_by_ms", 20000));
+            when(client.extendReservation(eq("res-alt-exc"), any(Object.class)))
+                    .thenThrow(new RuntimeException("connection reset"))
+                    .thenReturn(CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", System.currentTimeMillis() + 40000)));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(anyString(), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable tick = capturedHeartbeat.get();
+                        tick.run(); // tick 1: extend throws
+                        tick.run(); // tick 2: retries immediately, succeeds
+                        tick.run(); // tick 3: skipped after the success
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, times(2)).extendReservation(eq("res-alt-exc"), any(Object.class));
         }
     }
 

@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.1] - 2026-07-27
+
+### Fixed
+
+- **Heartbeat extend drift (P1 liveness).** Per the protocol spec, `extend_by_ms` is relative to the *current* `expires_at_ms` and the server caps `extension_count` (`max_extensions`, default 10). The heartbeat fired every `ttl/2` and extended by `ttl` on every tick, so expiry drifted ahead of the client by `+ttl/2` per beat — on process death the reservation could outlive the client by many minutes, locking up budget as a zombie — and burned the capped extension allowance twice as fast as needed. `CyclesLifecycleService` now extends on **alternate beats**: the first tick extends (only `ttl/2` of lifetime remains at that point), then exactly one tick is skipped after each *successful* extend; a failed extend (non-2xx or exception) retries on the very next tick. The extend amount stays `ttl` and no client/server clock comparison is introduced (clock skew makes `expires_at_ms` arithmetic unsafe). Net effect: no drift, remaining lifetime oscillates within `[ttl/2, 1.5·ttl]`, extension consumption halved. The context's `expiresAtMs` is still refreshed from each extend response.
+- **Estimate committed as actual is now marked.** When `@Cycles(actual = ...)` is not set and `useEstimateIfActualNotProvided` is `true` (the default), the commit silently recorded the *estimate* as measured spend. That fallback branch now merges `"actual_source": "estimate"` into the commit metadata (creating the map when absent) and logs the substitution at DEBUG, so server-side records can distinguish measured actuals from estimate-as-actual commits. The marker also flows through to the `POST /v1/events` recovery body, which copies commit metadata. Defaults are unchanged; commits with an explicit `actual` expression carry no marker.
+
 ## [0.3.0] - 2026-07-27
 
 ### Added
