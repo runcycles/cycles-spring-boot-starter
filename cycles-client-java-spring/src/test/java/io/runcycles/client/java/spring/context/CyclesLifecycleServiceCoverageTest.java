@@ -49,8 +49,8 @@ class CyclesLifecycleServiceCoverageTest {
         evaluator = mock(CyclesExpressionEvaluator.class);
         requestBuilderService = mock(CyclesRequestBuilderService.class);
         heartbeatExecutor = mock(ScheduledExecutorService.class);
-        when(heartbeatExecutor.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
-                .thenReturn(mock(ScheduledFuture.class));
+        when(heartbeatExecutor.schedule(any(Runnable.class), anyLong(), any(TimeUnit.class)))
+                .thenAnswer(inv -> mock(ScheduledFuture.class));
         service = new CyclesLifecycleService(client, retryEngine, requestBuilderService, evaluator, heartbeatExecutor);
     }
 
@@ -396,7 +396,7 @@ class CyclesLifecycleServiceCoverageTest {
             service.executeWithReservation(
                     () -> "ok", cycles, method, new Object[]{100}, this, "llm", "complete");
 
-            verify(heartbeatExecutor, never()).scheduleAtFixedRate(any(), anyLong(), anyLong(), any());
+            verify(heartbeatExecutor, never()).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
         }
 
         @Test
@@ -419,7 +419,7 @@ class CyclesLifecycleServiceCoverageTest {
             service.executeWithReservation(
                     () -> "ok", cycles, method, new Object[]{100}, this, "llm", "complete");
 
-            verify(heartbeatExecutor, never()).scheduleAtFixedRate(any(), anyLong(), anyLong(), any());
+            verify(heartbeatExecutor, never()).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
         }
     }
 

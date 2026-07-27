@@ -88,7 +88,7 @@ public String generateText(String prompt, int tokens) { ... }
 │     │   → throw CyclesProtocolException (method never runs)     │
 │     ├─ 200 ALLOW → reservation created, continue                │
 │     └─ 200 ALLOW_WITH_CAPS → Caps available via context         │
-│  3. Start heartbeat (POST .../extend at ttlMs/2 intervals)      │
+│  3. Start heartbeat (POST .../extend, grant-adaptive cadence)   │
 │  4. Execute the guarded method                                  │
 │     ├─ Success → evaluate actual expression                     │
 │     │    POST /v1/reservations/{reservation_id}/commit          │
@@ -367,7 +367,7 @@ public class TenantResolver implements CyclesFieldResolver {
 
 ## Heartbeat (Automatic TTL Extension)
 
-For long-running methods, the starter automatically extends the reservation TTL via the `/v1/reservations/{reservation_id}/extend` endpoint. The heartbeat fires at `ttlMs / 2` intervals to prevent the reservation from expiring while the method is still executing.
+For long-running methods, the starter automatically extends the reservation TTL via the `/v1/reservations/{reservation_id}/extend` endpoint. The first beat fires at `min(ttlMs/2, 30s)` (shortened further by a hint from the response `Date` header when a tenant policy may have capped the granted TTL); after that, beats self-reschedule at half the *observed* grant — the difference between successive `expires_at_ms` values returned by the server — and a beat is skipped while the accumulated grants prove the reservation still leads the clock by at least 1.5× the last grant. This keeps the reservation alive without drifting its expiry ahead of the client or burning the server's capped extension count.
 
 No configuration needed — it activates automatically when the server returns an `expires_at_ms` in the reservation response.
 

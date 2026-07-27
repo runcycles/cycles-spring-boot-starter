@@ -198,7 +198,7 @@ public class CyclesLifecycleService {
                 affectedScopes, scopePath, reserved, balances);
         CyclesContextHolder.set(ctx);
 
-        ScheduledFuture<?> heartbeatFuture = scheduleHeartbeat(
+        Runnable heartbeatCanceller = scheduleHeartbeat(
                 reservationId, cycles.ttlMs(), expiresAtMs, reservationResponse.getDateMs(), ctx);
 
         try {
@@ -246,7 +246,7 @@ public class CyclesLifecycleService {
             handleRelease(reservationId, "guarded_method_failed");
             throw ex;
         } finally {
-            cancelHeartbeat(heartbeatFuture);
+            cancelHeartbeat(heartbeatCanceller);
             CyclesContextHolder.clear();
         }
     }
@@ -371,125 +371,180 @@ public class CyclesLifecycleService {
     // -------------------------
     // Heartbeat
     // -------------------------
-    private ScheduledFuture<?> scheduleHeartbeat(String reservationId, long requestedTtlMs,
-                                                  Long expiresAtMs, Long serverDateMs,
-                                                  CyclesReservationContext ctx) {
+    /**
+     * Schedules the keepalive heartbeat for a reservation and returns a canceller
+     * (run it to stop the heartbeat), or {@code null} when no heartbeat is needed.
+     */
+    private Runnable scheduleHeartbeat(String reservationId, long requestedTtlMs,
+                                       Long expiresAtMs, Long serverDateMs,
+                                       CyclesReservationContext ctx) {
         if (expiresAtMs == null || requestedTtlMs <= 0) {
             return null;
         }
-        // Tenant policy max_reservation_ttl_ms silently CAPS the granted TTL at reserve
-        // time (governance default 1 hour) and the create response has no effective-TTL
-        // field. Seeding the beat from the requested ttl would schedule the first tick far
-        // too late (a 24h request capped to 1h would first beat at 12h — long after
-        // expiry). Recover the effective TTL from the reserve response itself:
-        // expires_at_ms − Date header, BOTH server-frame timestamps, so the difference is
-        // clock-skew-free. Clamp to [1000, requestedTtl] to defuse a mangled Date header.
-        final long ttlMs = serverDateMs != null
-                ? Math.max(1000L, Math.min(expiresAtMs - serverDateMs, requestedTtlMs))
-                : requestedTtlMs;
-        // No floor: spec ttl_ms minimum is 1000, so the interval is at least 500ms. A floor
-        // above ttl/2 would guarantee a lapse for small TTLs (tick after expiry).
-        long intervalMs = ttlMs / 2;
-        LOG.debug("Scheduling heartbeat: reservationId={}, effectiveTtlMs={}, intervalMs={}",
-                reservationId, ttlMs, intervalMs);
-        // Lead-estimate extension: extend_by_ms is relative to the CURRENT expires_at_ms,
-        // so extending ttlMs on every ttl/2 tick would drift expiry ahead by +ttl/2 per beat
-        // (a zombie budget lockup if the process dies) and burn the server's capped
-        // extension_count twice as fast as needed. Each tick estimates how far expiry leads
-        // "now" and only extends when the lead has dropped below 1.5*ttl:
+        // FIRST-BEAT CADENCE. Tenant policy max_reservation_ttl_ms silently CAPS the
+        // granted TTL at reserve time (governance default 1 hour) and the create response
+        // has no effective-TTL field, so requestedTtl/2 alone could schedule the first
+        // beat long after expiry (a 24h request capped to 1h would first beat at 12h).
+        // Two hints bound the first delay:
+        //   - a hard 30s ceiling — cheap insurance against any unknown cap;
+        //   - the Date-derived estimate (expires_at_ms − Date header), HALVED, when
+        //     positive. This is a cadence HINT only, never a correctness input: per
+        //     RFC 9110 Date is a whole-second, best-effort origination timestamp that
+        //     intermediaries may replace, and it is not even guaranteed to share a clock
+        //     with expires_at_ms (in cycles-server expires_at_ms comes from Redis TIME
+        //     while Date comes from the servlet container). It is deliberately NOT
+        //     clamped upward: a mangled Date merely makes the first beat early, which
+        //     costs one harmless extend — clamping it up would fabricate lease time.
+        // Correctness (never letting the reservation lapse while skipping beats) comes
+        // from the leadMin lower bound below, which uses no cross-clock arithmetic.
+        long firstDelayMs = Math.min(requestedTtlMs / 2, 30_000L);
+        if (serverDateMs != null) {
+            long dateDerivedEstMs = expiresAtMs - serverDateMs;
+            if (dateDerivedEstMs > 0) {
+                firstDelayMs = Math.min(firstDelayMs, dateDerivedEstMs / 2);
+            }
+        }
+        LOG.debug("Scheduling heartbeat: reservationId={}, requestedTtlMs={}, firstDelayMs={}",
+                reservationId, requestedTtlMs, firstDelayMs);
+        // LEAD LOWER BOUND. extend_by_ms is relative to the CURRENT expires_at_ms, so
+        // blindly extending on every beat would drift expiry ahead of the client (a
+        // zombie budget lockup if the process dies) and burn the server's capped
+        // extension_count faster than needed. Each beat computes a conservative lower
+        // bound on how far expiry leads "now":
         //
-        //   leadMs = (knownExpiry - initialExpiry) + ttlMs - elapsedMs
+        //   leadMinMs = grantsSum - elapsedMs
         //
-        // This is clock-skew-free: (knownExpiry - initialExpiry) is a difference of two
-        // SERVER-frame timestamps and elapsedMs is a difference of two CLIENT-monotonic
-        // readings — the client's wall clock is never compared with the server's wall clock.
-        // scheduleAtFixedRate catch-up ticks self-correct: a zero-gap queued tick sees the
-        // lead unchanged-high and skips, so a slow extend can never double-extend.
+        // where grantsSum is the sum of observed grants (differences of successive
+        // returned expires_at_ms values — same server frame, so skew-free) and elapsedMs
+        // is a difference of two client-monotonic readings. It starts at 0 (nothing
+        // proven yet), so the first beat always extends; the bound only ever
+        // understates the true lead, so skipping on it can never cause a lapse. A beat
+        // skips only when leadMinMs >= 1.5 x the last observed grant; otherwise it
+        // extends by the REQUESTED ttl (the server clamps to what policy allows, and
+        // the returned expires_at_ms reveals the actual grant).
         //
-        // Failure handling: a failed extend keeps its idempotency key and retries it on the
-        // next tick, so a lost response can never double-extend. Permanent failures
-        // (410/RESERVATION_EXPIRED, RESERVATION_FINALIZED, MAX_EXTENSIONS_EXCEEDED,
-        // TENANT_CLOSED, NOT_FOUND) stop the heartbeat for good — all irreversible; no
-        // amount of retrying can revive those.
-        final long initialExpiry = expiresAtMs;
+        // SCHEDULING. Beats are one-shot and self-rescheduling (schedule, not
+        // scheduleAtFixedRate) so the cadence can adapt to the observed grant:
+        // after a success the next delay is clamp(lastGrant/2, 500, requestedTtl/2).
+        // One-shot scheduling also removes the fixed-rate catch-up hazard by
+        // construction — there is no queue of missed ticks to fire back-to-back,
+        // because the next beat is only scheduled when the current one finishes.
+        //
+        // FAILURE HANDLING. A failed extend keeps its idempotency key and retries it on
+        // the next beat (at the current delay), so a lost response can never
+        // double-extend. Permanent failures (410/RESERVATION_EXPIRED,
+        // RESERVATION_FINALIZED, MAX_EXTENSIONS_EXCEEDED, TENANT_CLOSED, NOT_FOUND)
+        // stop the heartbeat for good — all irreversible; no amount of retrying can
+        // revive those.
         final long anchorNanos = nanoClock.getAsLong();
-        AtomicLong knownExpiry = new AtomicLong(initialExpiry);
+        AtomicLong prevExpiry = new AtomicLong(expiresAtMs);
+        AtomicLong grantsSum = new AtomicLong(0);
+        AtomicReference<Long> lastGrant = new AtomicReference<>();
+        AtomicLong delayMs = new AtomicLong(firstDelayMs);
         AtomicReference<String> pendingKey = new AtomicReference<>();
         AtomicReference<ScheduledFuture<?>> selfRef = new AtomicReference<>();
         AtomicBoolean stopped = new AtomicBoolean(false);
-        ScheduledFuture<?> future = heartbeatExecutor.scheduleAtFixedRate(() -> {
-            if (stopped.get()) {
-                return;
-            }
-            long elapsedMs = (nanoClock.getAsLong() - anchorNanos) / 1_000_000L;
-            long leadMs = (knownExpiry.get() - initialExpiry) + ttlMs - elapsedMs;
-            if (leadMs >= ttlMs + ttlMs / 2) {
-                LOG.debug("Skipping heartbeat tick, expiry lead still ample: reservationId={}, leadMs={}",
-                        reservationId, leadMs);
-                return;
-            }
-            try {
-                // Reuse the pending idempotency key after a failure so a lost response
-                // replays instead of double-extending; regenerate only after a 2xx.
-                String key = pendingKey.get();
-                if (key == null) {
-                    key = UUID.randomUUID().toString();
-                    pendingKey.set(key);
+        Runnable beat = new Runnable() {
+            @Override
+            public void run() {
+                if (stopped.get()) {
+                    return;
                 }
-                LOG.debug("Sending heartbeat extend: reservationId={}, leadMs={}", reservationId, leadMs);
-                // Copy so the reused key lands in the body; the client mirrors the body's
-                // idempotency_key into the X-Idempotency-Key header, keeping them consistent.
-                Map<String, Object> extendBody = new LinkedHashMap<>(requestBuilderService.buildExtend(ttlMs, null));
-                extendBody.put(Constants.IDEMPOTENCY_KEY, key);
-                CyclesResponse<Map<String, Object>> extendResponse = client.extendReservation(reservationId, extendBody);
-                if (extendResponse.is2xx()) {
-                    pendingKey.set(null);
-                    ExtendResult extResult = ExtendResult.fromMap(extendResponse.getBody());
-                    if (extResult == null || extResult.getStatus() != ExtendStatus.ACTIVE) {
-                        LOG.warn("Heartbeat extend returned 2xx with unexpected status, treating as applied: "
-                                + "reservationId={}, status={}", reservationId,
-                                extResult != null ? extResult.getStatus() : null);
-                    }
-                    Long newExpiresAtMs = extResult != null ? extResult.getExpiresAtMs() : null;
-                    long resolvedExpiry = newExpiresAtMs != null ? newExpiresAtMs : knownExpiry.get() + ttlMs;
-                    knownExpiry.set(resolvedExpiry);
-                    ctx.updateExpiresAtMs(resolvedExpiry);
-                    LOG.debug("Heartbeat extend successful: reservationId={}, newExpiresAtMs={}",
-                            reservationId, resolvedExpiry);
+                long elapsedMs = (nanoClock.getAsLong() - anchorNanos) / 1_000_000L;
+                long leadMinMs = grantsSum.get() - elapsedMs;
+                Long grant = lastGrant.get();
+                if (grant != null && leadMinMs >= grant + grant / 2) {
+                    LOG.debug("Skipping heartbeat beat, expiry lead still ample: reservationId={}, leadMinMs={}",
+                            reservationId, leadMinMs);
                 } else {
-                    ErrorCode errorCode = extractErrorCode(extendResponse);
-                    if (extendResponse.getStatus() == 410
-                            || errorCode == ErrorCode.RESERVATION_EXPIRED
-                            || errorCode == ErrorCode.RESERVATION_FINALIZED
-                            || errorCode == ErrorCode.MAX_EXTENSIONS_EXCEEDED
-                            || errorCode == ErrorCode.TENANT_CLOSED
-                            || errorCode == ErrorCode.NOT_FOUND) {
-                        stopped.set(true);
-                        LOG.warn("Heartbeat extend failed permanently, stopping heartbeat: "
-                                + "reservationId={}, status={}, errorCode={}",
-                                reservationId, extendResponse.getStatus(), errorCode);
-                        ScheduledFuture<?> self = selfRef.get();
-                        if (self != null) {
-                            self.cancel(false);
+                    try {
+                        // Reuse the pending idempotency key after a failure so a lost response
+                        // replays instead of double-extending; regenerate only after a 2xx.
+                        String key = pendingKey.get();
+                        if (key == null) {
+                            key = UUID.randomUUID().toString();
+                            pendingKey.set(key);
                         }
-                    } else {
-                        LOG.warn("Heartbeat extend failed, will retry next tick with the same idempotency key: "
-                                + "reservationId={}, status={}, error={}",
-                                reservationId, extendResponse.getStatus(), extendResponse.getErrorMessage());
+                        LOG.debug("Sending heartbeat extend: reservationId={}, leadMinMs={}",
+                                reservationId, leadMinMs);
+                        // Copy so the reused key lands in the body; the client mirrors the body's
+                        // idempotency_key into the X-Idempotency-Key header, keeping them consistent.
+                        Map<String, Object> extendBody =
+                                new LinkedHashMap<>(requestBuilderService.buildExtend(requestedTtlMs, null));
+                        extendBody.put(Constants.IDEMPOTENCY_KEY, key);
+                        CyclesResponse<Map<String, Object>> extendResponse =
+                                client.extendReservation(reservationId, extendBody);
+                        if (extendResponse.is2xx()) {
+                            pendingKey.set(null);
+                            ExtendResult extResult = ExtendResult.fromMap(extendResponse.getBody());
+                            if (extResult == null || extResult.getStatus() != ExtendStatus.ACTIVE) {
+                                LOG.warn("Heartbeat extend returned 2xx with unexpected status, treating as applied: "
+                                        + "reservationId={}, status={}", reservationId,
+                                        extResult != null ? extResult.getStatus() : null);
+                            }
+                            Long newExpiresAtMs = extResult != null ? extResult.getExpiresAtMs() : null;
+                            long prev = prevExpiry.get();
+                            // The observed grant is the difference of two successive
+                            // server-frame expires_at_ms values; when the response omits
+                            // expires_at_ms assume the conservative requested-ttl grant.
+                            long appliedGrant = newExpiresAtMs != null
+                                    ? newExpiresAtMs - prev : requestedTtlMs;
+                            long resolvedExpiry = newExpiresAtMs != null
+                                    ? newExpiresAtMs : prev + requestedTtlMs;
+                            prevExpiry.set(resolvedExpiry);
+                            grantsSum.addAndGet(appliedGrant);
+                            lastGrant.set(appliedGrant);
+                            delayMs.set(Math.max(500L, Math.min(appliedGrant / 2, requestedTtlMs / 2)));
+                            ctx.updateExpiresAtMs(resolvedExpiry);
+                            LOG.debug("Heartbeat extend successful: reservationId={}, newExpiresAtMs={}, "
+                                    + "grantMs={}, nextDelayMs={}",
+                                    reservationId, resolvedExpiry, appliedGrant, delayMs.get());
+                        } else {
+                            ErrorCode errorCode = extractErrorCode(extendResponse);
+                            if (extendResponse.getStatus() == 410
+                                    || errorCode == ErrorCode.RESERVATION_EXPIRED
+                                    || errorCode == ErrorCode.RESERVATION_FINALIZED
+                                    || errorCode == ErrorCode.MAX_EXTENSIONS_EXCEEDED
+                                    || errorCode == ErrorCode.TENANT_CLOSED
+                                    || errorCode == ErrorCode.NOT_FOUND) {
+                                stopped.set(true);
+                                LOG.warn("Heartbeat extend failed permanently, stopping heartbeat: "
+                                        + "reservationId={}, status={}, errorCode={}",
+                                        reservationId, extendResponse.getStatus(), errorCode);
+                                ScheduledFuture<?> self = selfRef.get();
+                                if (self != null) {
+                                    self.cancel(false);
+                                }
+                            } else {
+                                LOG.warn("Heartbeat extend failed, will retry next beat with the same "
+                                        + "idempotency key: reservationId={}, status={}, error={}",
+                                        reservationId, extendResponse.getStatus(),
+                                        extendResponse.getErrorMessage());
+                            }
+                        }
+                    } catch (Exception e) {
+                        LOG.warn("Heartbeat extend error, will retry next beat with the same idempotency key: "
+                                + "reservationId={}", reservationId, e);
                     }
                 }
-            } catch (Exception e) {
-                LOG.warn("Heartbeat extend error, will retry next tick with the same idempotency key: "
-                        + "reservationId={}", reservationId, e);
+                if (!stopped.get()) {
+                    selfRef.set(heartbeatExecutor.schedule(this, delayMs.get(), TimeUnit.MILLISECONDS));
+                }
             }
-        }, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
-        selfRef.set(future);
-        return future;
+        };
+        selfRef.set(heartbeatExecutor.schedule(beat, firstDelayMs, TimeUnit.MILLISECONDS));
+        return () -> {
+            stopped.set(true);
+            ScheduledFuture<?> f = selfRef.get();
+            if (f != null) {
+                f.cancel(false);
+            }
+        };
     }
 
-    private void cancelHeartbeat(ScheduledFuture<?> heartbeatFuture) {
-        if (heartbeatFuture != null) {
-            heartbeatFuture.cancel(false);
+    private void cancelHeartbeat(Runnable heartbeatCanceller) {
+        if (heartbeatCanceller != null) {
+            heartbeatCanceller.run();
         }
     }
 
