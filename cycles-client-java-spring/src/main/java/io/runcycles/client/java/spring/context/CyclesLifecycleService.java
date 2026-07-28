@@ -10,10 +10,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
+import java.math.BigInteger;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -28,6 +32,23 @@ import java.util.function.LongSupplier;
 public class CyclesLifecycleService {
 
     private static final Logger LOG = LoggerFactory.getLogger(CyclesLifecycleService.class);
+    private static final Set<String> UNITS = Set.of(
+            "USD_MICROCENTS", "TOKENS", "CREDITS", "RISK_POINTS");
+    private static final Set<String> CREATE_RESPONSE_FIELDS = Set.of(
+            "decision", "reservation_id", "affected_scopes", "expires_at_ms",
+            "remaining_ttl_ms", "scope_path", "reserved", "caps", "reason_code",
+            "retry_after_ms", "balances", "cycles_evidence");
+    private static final Set<String> EXTEND_RESPONSE_FIELDS = Set.of(
+            "status", "expires_at_ms", "remaining_ttl_ms", "balances");
+    private static final Set<String> AMOUNT_FIELDS = Set.of("unit", "amount");
+    private static final Set<String> CAPS_FIELDS = Set.of(
+            "max_tokens", "max_steps_remaining", "tool_allowlist",
+            "tool_denylist", "cooldown_ms");
+    private static final Set<String> BALANCE_FIELDS = Set.of(
+            "scope", "scope_path", "remaining", "reserved", "spent", "allocated",
+            "debt", "overdraft_limit", "is_over_limit");
+    private static final Set<String> EVIDENCE_FIELDS = Set.of(
+            "evidence_id", "cycles_evidence_url");
 
     private final CyclesClient client;
     private final CommitRetryEngine retryEngine;
@@ -70,7 +91,8 @@ public class CyclesLifecycleService {
      * @param requestBuilderService the request builder service
      * @param evaluator             the SpEL expression evaluator
      * @param requestTimeoutBudget  the enforced upper bound for one complete
-     *                              HTTP attempt (connect + read), or {@code null}
+     *                              HTTP attempt (pool, connect, write, response
+     *                              body, and failure detection), or {@code null}
      *                              when unknown/unbounded
      */
     public CyclesLifecycleService(CyclesClient client,
@@ -124,6 +146,265 @@ public class CyclesLifecycleService {
         this.requestTimeoutBudgetMs = requestTimeoutBudgetMs;
     }
 
+    private record CreateAttempt(
+            CyclesResponse<Map<String, Object>> response,
+            ReservationResult result,
+            long rttMs,
+            long receivedNanos) {}
+
+    /**
+     * Runs a client call under the same complete-attempt deadline used by the
+     * heartbeat reserve. This wrapper also protects custom {@link CyclesClient}
+     * beans whose transport timeout behavior is otherwise unknown.
+     */
+    private <T> T callWithAttemptDeadline(Callable<T> call) throws Exception {
+        if (requestTimeoutBudgetMs == null) {
+            return call.call();
+        }
+        FutureTask<T> task = new FutureTask<>(call);
+        Thread worker = new Thread(task, "cycles-http-attempt");
+        worker.setDaemon(true);
+        worker.start();
+        try {
+            return task.get(Math.max(0L, requestTimeoutBudgetMs), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            task.cancel(true);
+            throw new TimeoutException(
+                    "Cycles HTTP attempt exceeded " + requestTimeoutBudgetMs + "ms");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception exception) {
+                throw exception;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException(cause);
+        } catch (InterruptedException e) {
+            task.cancel(true);
+            Thread.currentThread().interrupt();
+            throw e;
+        }
+    }
+
+    private CreateAttempt createReservationWithRecovery(Map<String, Object> body) throws Exception {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            long sentNanos = nanoClock.getAsLong();
+            CyclesResponse<Map<String, Object>> response;
+            try {
+                response = callWithAttemptDeadline(() -> client.createReservation(body));
+            } catch (Exception e) {
+                if (attempt == 0) {
+                    continue;
+                }
+                throw new CyclesProtocolException(
+                        "Create reservation remained ambiguous after same-key retry: " + e.getMessage(),
+                        ErrorCode.INTERNAL_ERROR, null, 0);
+            }
+            if (isSchemaValidCreateResponse(response)) {
+                ReservationResult result = ReservationResult.fromMap(response.getBody());
+                long receivedNanos = nanoClock.getAsLong();
+                return new CreateAttempt(
+                        response,
+                        result,
+                        reliableElapsedMs(sentNanos, receivedNanos),
+                        receivedNanos);
+            }
+            boolean recoverable = response.isTransportError()
+                    || response.is5xx() || response.is2xx();
+            if (attempt == 0 && recoverable) {
+                continue;
+            }
+            if (!response.is2xx()) {
+                throw buildProtocolException("Failed to create reservation", response);
+            }
+            throw new CyclesProtocolException(
+                    "Create reservation did not produce a schema-valid HTTP 200 response",
+                    ErrorCode.INTERNAL_ERROR, null, response.getStatus());
+        }
+        throw new CyclesProtocolException("Create reservation recovery exhausted");
+    }
+
+    static boolean isSchemaValidCreateResponse(
+            CyclesResponse<Map<String, Object>> response) {
+        if (response == null || response.getStatus() != 200) return false;
+        Map<String, Object> body = response.getBody();
+        if (body == null || !CREATE_RESPONSE_FIELDS.containsAll(body.keySet())) return false;
+        Object decision = body.get("decision");
+        if (!(decision instanceof String value)
+                || !Set.of("ALLOW", "ALLOW_WITH_CAPS", "DENY").contains(value)) {
+            return false;
+        }
+        if (!isStringList(body.get("affected_scopes"), null)) return false;
+        if (!optionalType(body, "reservation_id", String.class)
+                || !optionalInt64(body, "expires_at_ms", true)
+                || !optionalInt64(body, "remaining_ttl_ms", true)
+                || !optionalType(body, "scope_path", String.class)
+                || !optionalMap(body, "reserved", amount -> isAmount(amount, false))
+                || !optionalMap(body, "caps", CyclesLifecycleService::isCaps)
+                || !optionalString(body, "reason_code", 128)
+                || !optionalInteger(body, "retry_after_ms", true)
+                || !optionalList(body, "balances", CyclesLifecycleService::isBalance)
+                || !optionalMap(body, "cycles_evidence",
+                        CyclesLifecycleService::isEvidenceRef)) {
+            return false;
+        }
+        return true;
+    }
+
+    static boolean isSchemaValidExtendResponse(
+            CyclesResponse<Map<String, Object>> response) {
+        if (response == null || response.getStatus() != 200) return false;
+        Map<String, Object> body = response.getBody();
+        return body != null
+                && EXTEND_RESPONSE_FIELDS.containsAll(body.keySet())
+                && "ACTIVE".equals(body.get("status"))
+                && requiredInt64(body.get("expires_at_ms"), true)
+                && optionalInt64(body, "remaining_ttl_ms", true)
+                && optionalList(body, "balances", CyclesLifecycleService::isBalance);
+    }
+
+    private static boolean isRecoverableExtendFailure(
+            CyclesResponse<Map<String, Object>> response) {
+        return response.isTransportError()
+                || response.is5xx()
+                || response.getStatus() == 429
+                || response.is2xx();
+    }
+
+    private static boolean optionalType(
+            Map<String, Object> body, String key, Class<?> type) {
+        return !body.containsKey(key) || type.isInstance(body.get(key));
+    }
+
+    private static boolean optionalString(
+            Map<String, Object> body, String key, int maxLength) {
+        if (!body.containsKey(key)) return true;
+        return body.get(key) instanceof String value
+                && value.codePointCount(0, value.length()) <= maxLength;
+    }
+
+    private static boolean optionalInt64(
+            Map<String, Object> body, String key, boolean nonNegative) {
+        return !body.containsKey(key) || requiredInt64(body.get(key), nonNegative);
+    }
+
+    private static boolean optionalInteger(
+            Map<String, Object> body, String key, boolean nonNegative) {
+        if (!body.containsKey(key)) return true;
+        Object value = body.get(key);
+        return requiredInt64(value, nonNegative)
+                && ((Number) value).longValue() <= Integer.MAX_VALUE;
+    }
+
+    private static boolean requiredInt64(Object value, boolean nonNegative) {
+        if (value instanceof BigInteger integer) {
+            return integer.compareTo(BigInteger.valueOf(Long.MIN_VALUE)) >= 0
+                    && integer.compareTo(BigInteger.valueOf(Long.MAX_VALUE)) <= 0
+                    && (!nonNegative || integer.signum() >= 0);
+        }
+        if (!(value instanceof Byte || value instanceof Short
+                || value instanceof Integer || value instanceof Long)) {
+            return false;
+        }
+        return !nonNegative || ((Number) value).longValue() >= 0L;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean optionalMap(
+            Map<String, Object> body,
+            String key,
+            java.util.function.Predicate<Map<String, Object>> validator) {
+        if (!body.containsKey(key)) return true;
+        Object value = body.get(key);
+        return value instanceof Map<?, ?>
+                && validator.test((Map<String, Object>) value);
+    }
+
+    private static boolean optionalList(
+            Map<String, Object> body,
+            String key,
+            java.util.function.Predicate<Map<String, Object>> validator) {
+        if (!body.containsKey(key)) return true;
+        Object value = body.get(key);
+        if (!(value instanceof List<?> list)) return false;
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> map)) return false;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> typed = (Map<String, Object>) map;
+            if (!validator.test(typed)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isStringList(Object value, Integer maxLength) {
+        if (!(value instanceof List<?> list)) return false;
+        for (Object item : list) {
+            if (!(item instanceof String string)
+                    || (maxLength != null
+                    && string.codePointCount(0, string.length()) > maxLength)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isAmount(Map<String, Object> value, boolean signed) {
+        return AMOUNT_FIELDS.containsAll(value.keySet())
+                && value.keySet().containsAll(AMOUNT_FIELDS)
+                && value.get("unit") instanceof String unit
+                && UNITS.contains(unit)
+                && requiredInt64(value.get("amount"), !signed);
+    }
+
+    private static boolean isCaps(Map<String, Object> value) {
+        if (!CAPS_FIELDS.containsAll(value.keySet())) return false;
+        for (String key : List.of("max_tokens", "max_steps_remaining", "cooldown_ms")) {
+            if (!optionalInteger(value, key, true)) return false;
+        }
+        for (String key : List.of("tool_allowlist", "tool_denylist")) {
+            if (value.containsKey(key) && !isStringList(value.get(key), 256)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isBalance(Map<String, Object> value) {
+        if (!BALANCE_FIELDS.containsAll(value.keySet())
+                || !(value.get("scope") instanceof String)
+                || !(value.get("scope_path") instanceof String)
+                || !requiredAmount(value.get("remaining"), true)
+                || !optionalMap(value, "reserved", amount -> isAmount(amount, false))
+                || !optionalMap(value, "spent", amount -> isAmount(amount, false))
+                || !optionalMap(value, "allocated", amount -> isAmount(amount, false))
+                || !optionalMap(value, "debt", amount -> isAmount(amount, false))
+                || !optionalMap(value, "overdraft_limit", amount -> isAmount(amount, false))) {
+            return false;
+        }
+        return !value.containsKey("is_over_limit")
+                || value.get("is_over_limit") instanceof Boolean;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean requiredAmount(Object value, boolean signed) {
+        return value instanceof Map<?, ?>
+                && isAmount((Map<String, Object>) value, signed);
+    }
+
+    private static boolean isEvidenceRef(Map<String, Object> value) {
+        if (!EVIDENCE_FIELDS.containsAll(value.keySet())
+                || !value.keySet().containsAll(EVIDENCE_FIELDS)
+                || !(value.get("evidence_id") instanceof String id)
+                || !id.matches("^[0-9a-f]{64}$")
+                || !(value.get("cycles_evidence_url") instanceof String url)) {
+            return false;
+        }
+        try {
+            return new URI(url).isAbsolute();
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
+
     /**
      * Executes the full reserve/execute/commit lifecycle.
      *
@@ -155,20 +436,10 @@ public class CyclesLifecycleService {
         LOG.debug("Creating reservation: createBody={}", createBody);
 
         long resT1 = System.currentTimeMillis();
-        // Round-trip of the create call on the injected monotonic clock — feeds the
-        // remaining_ttl_ms lead-floor computation when the server emits the field.
-        // Rounded UP so rounding cannot consume the reserved margin.
-        long createSentNanos = nanoClock.getAsLong();
-        CyclesResponse<Map<String, Object>> reservationResponse = client.createReservation(createBody);
-        long createRttMs = ceilToMs(nanoClock.getAsLong() - createSentNanos);
-
-        if (!reservationResponse.is2xx()) {
-            LOG.error("Reservation failed, aborting: reservationResponse={}", reservationResponse);
-            throw buildProtocolException("Failed to create reservation", reservationResponse);
-        }
-
-        // Parse reservation response into typed DTO
-        ReservationResult resResult = ReservationResult.fromMap(reservationResponse.getBody());
+        CreateAttempt createAttempt = createReservationWithRecovery(createBody);
+        CyclesResponse<Map<String, Object>> reservationResponse = createAttempt.response();
+        ReservationResult resResult = createAttempt.result();
+        long createRttMs = createAttempt.rttMs();
         long resT2 = System.currentTimeMillis();
 
         if (resResult == null) {
@@ -249,7 +520,8 @@ public class CyclesLifecycleService {
 
         Runnable heartbeatCanceller = scheduleHeartbeat(
                 reservationId, cycles.ttlMs(), expiresAtMs,
-                resResult.getRemainingTtlMs(), createRttMs, ctx);
+                resResult.getRemainingTtlMs(), createRttMs,
+                createAttempt.receivedNanos(), ctx);
 
         try {
             // Execute guarded action
@@ -427,12 +699,13 @@ public class CyclesLifecycleService {
      */
     private Runnable scheduleHeartbeat(String reservationId, long requestedTtlMs,
                                        Long expiresAtMs, Long createRemainingTtlMs,
-                                       long createRttMs, CyclesReservationContext ctx) {
+                                       long createRttMs, long createReceivedNanos,
+                                       CyclesReservationContext ctx) {
         if (expiresAtMs == null || requestedTtlMs <= 0) {
             return null;
         }
         // NORMATIVE SCHEDULING (remaining_ttl_ms — HEARTBEAT GUIDANCE in
-        // cycles-protocol-v0.yaml, spec PR #148 head dd60c27). Only a SCHEMA-VALID
+        // cycles-protocol-v0.yaml in spec PR #148). Only a SCHEMA-VALID
         // HTTP 200 ReservationExtendResponse (status=ACTIVE + expires_at_ms), or the
         // initial ReservationCreateResponse, counts as an observed success in this
         // mode; any other or malformed 2xx is AMBIGUOUS and is treated as a transient
@@ -568,7 +841,11 @@ public class CyclesLifecycleService {
         AtomicLong lastRecoveryWindow = new AtomicLong(Long.MIN_VALUE);
         long firstDelayMs = 0L;
         if (createRemainingTtlMs != null) {
-            long leadFloor = Math.max(0L, createRemainingTtlMs - Math.max(createRttMs, 0L));
+            long leadAtReceipt = Math.max(
+                    0L, createRemainingTtlMs - Math.max(createRttMs, 0L));
+            long localSetupElapsedMs =
+                    reliableElapsedMs(createReceivedNanos, anchorNanos);
+            long leadFloor = Math.max(0L, leadAtReceipt - localSetupElapsedMs);
             lastLeadFloorMs.set(leadFloor);
             firstDelayMs = nextFieldDelayMs(leadFloor, maxRttMs.get());
             // A zero first delay is itself the one permitted immediate attempt.
@@ -648,7 +925,8 @@ public class CyclesLifecycleService {
              * while a complete attempt plus margin provably fits.
              */
             private void fieldRecovery(Integer retryAfterMs, boolean rateLimited) {
-                long elapsedSinceLeadMs = ceilToMs(nanoClock.getAsLong() - leadFloorAtNanos.get());
+                long elapsedSinceLeadMs =
+                        reliableElapsedMs(leadFloorAtNanos.get(), nanoClock.getAsLong());
                 long currentLeadMs = Math.max(0L, lastLeadFloorMs.get() - elapsedSinceLeadMs);
                 long retryWindow = retryWindowMs(currentLeadMs, maxRttMs.get());
                 long prevElapsed = lastRecoveryElapsed.getAndSet(elapsedSinceLeadMs);
@@ -734,19 +1012,15 @@ public class CyclesLifecycleService {
                         extendBody.put(Constants.IDEMPOTENCY_KEY, key);
                         long sentNanos = nanoClock.getAsLong();
                         CyclesResponse<Map<String, Object>> extendResponse =
-                                client.extendReservation(reservationId, extendBody);
+                                callWithAttemptDeadline(
+                                        () -> client.extendReservation(reservationId, extendBody));
+                        boolean schemaValid = isSchemaValidExtendResponse(extendResponse);
+                        ExtendResult extResult = schemaValid
+                                ? ExtendResult.fromMap(extendResponse.getBody()) : null;
                         long receivedNanos = nanoClock.getAsLong();
                         // Per-attempt rtt, rounded UP so rounding cannot consume margin.
-                        long rttMs = ceilToMs(receivedNanos - sentNanos);
+                        long rttMs = reliableElapsedMs(sentNanos, receivedNanos);
                         maxRttMs.accumulateAndGet(rttMs, Math::max);
-                        ExtendResult extResult = extendResponse.is2xx()
-                                ? ExtendResult.fromMap(extendResponse.getBody()) : null;
-                        // SUCCESS PREDICATE (field mode): only a schema-valid HTTP 200
-                        // ReservationExtendResponse counts — status ACTIVE + expires_at_ms.
-                        boolean schemaValid = extendResponse.getStatus() == 200
-                                && extResult != null
-                                && extResult.getStatus() == ExtendStatus.ACTIVE
-                                && extResult.getExpiresAtMs() != null;
                         if (fieldMode) {
                             if (schemaValid) {
                                 pendingKey.set(null);
@@ -781,6 +1055,9 @@ public class CyclesLifecycleService {
                                 // rotate the key and retry an unchanged request.
                                 stopAndSurface("extend rejected with status "
                                         + extendResponse.getStatus() + "; not retrying an unchanged request");
+                            } else if (!isRecoverableExtendFailure(extendResponse)) {
+                                stopAndSurface("extend returned unexpected HTTP status "
+                                        + extendResponse.getStatus());
                             } else {
                                 // Transient: timeout/connection/5xx/429/ambiguous 2xx.
                                 boolean rateLimited = extendResponse.getStatus() == 429;
@@ -792,29 +1069,18 @@ public class CyclesLifecycleService {
                                 }
                                 fieldRecovery(rateLimited ? extendResponse.getRetryAfterMs() : null, rateLimited);
                             }
-                        } else if (extendResponse.is2xx()) {
-                            // Fallback path keeps its 2xx-as-applied behavior.
+                        } else if (schemaValid) {
                             pendingKey.set(null);
-                            if (extResult == null || extResult.getStatus() != ExtendStatus.ACTIVE) {
-                                LOG.warn("Heartbeat extend returned 2xx with unexpected status, treating as applied: "
-                                        + "reservationId={}, status={}", reservationId,
-                                        extResult != null ? extResult.getStatus() : null);
-                            }
-                            Long newExpiresAtMs = extResult != null ? extResult.getExpiresAtMs() : null;
+                            Long newExpiresAtMs = extResult.getExpiresAtMs();
                             long prev = prevExpiry.get();
-                            // The observed grant is the difference of two successive
-                            // server-frame expires_at_ms values; when the response omits
-                            // expires_at_ms assume the conservative requested-ttl grant.
-                            long appliedGrant = newExpiresAtMs != null
-                                    ? newExpiresAtMs - prev : requestedTtlMs;
-                            long resolvedExpiry = newExpiresAtMs != null
-                                    ? newExpiresAtMs : prev + requestedTtlMs;
+                            long appliedGrant = newExpiresAtMs - prev;
+                            long resolvedExpiry = newExpiresAtMs;
                             prevExpiry.set(resolvedExpiry);
                             long nowNanos = nanoClock.getAsLong();
                             long elapsedSinceSuccessMs =
                                     ceilToMs(nowNanos - lastSuccessNanos.getAndSet(nowNanos));
-                            Long remainingTtlMs = extResult != null ? extResult.getRemainingTtlMs() : null;
-                            if (schemaValid && remainingTtlMs != null) {
+                            Long remainingTtlMs = extResult.getRemainingTtlMs();
+                            if (remainingTtlMs != null) {
                                 // A schema-valid 200 carrying the field (re)enters field mode.
                                 applyFieldSchedule(Math.max(0L, remainingTtlMs - rttMs), receivedNanos);
                             } else {
@@ -827,6 +1093,11 @@ public class CyclesLifecycleService {
                             LOG.debug("Heartbeat extend successful: reservationId={}, newExpiresAtMs={}, "
                                     + "grantMs={}, remainingTtlMs={}, nextDelayMs={}",
                                     reservationId, resolvedExpiry, appliedGrant, remainingTtlMs, delayMs.get());
+                        } else if (extendResponse.is2xx()) {
+                            LOG.warn("Heartbeat extend returned an ambiguous 2xx (not a schema-valid "
+                                    + "200 ReservationExtendResponse); retrying next beat with the same "
+                                    + "idempotency key: reservationId={}, status={}",
+                                    reservationId, extendResponse.getStatus());
                         } else if (!handledPermanently(extendResponse)) {
                             LOG.warn("Heartbeat extend failed, will retry next beat with the same "
                                     + "idempotency key: reservationId={}, status={}, error={}, nextDelayMs={}",
@@ -867,6 +1138,12 @@ public class CyclesLifecycleService {
     /** Nanos to ms rounded UP (rtts and elapsed feeding budgets/lead bounds round up). */
     private static long ceilToMs(long nanos) {
         return nanos <= 0L ? 0L : (nanos - 1L) / 1_000_000L + 1L;
+    }
+
+    /** Negative monotonic deltas are unreliable timing, represented as infinity. */
+    private static long reliableElapsedMs(long startedNanos, long finishedNanos) {
+        long elapsedNanos = finishedNanos - startedNanos;
+        return elapsedNanos < 0L ? Long.MAX_VALUE : ceilToMs(elapsedNanos);
     }
 
     private static long satAdd(long a, long b) {

@@ -207,9 +207,9 @@ public class CyclesResponse<T> {
      * Captured on successful (2xx) responses only. Per RFC 9110 this is a
      * whole-second, best-effort origination timestamp that intermediaries may
      * replace, and it is not guaranteed to share a clock with body fields like
-     * {@code expires_at_ms} — so it must never be used as a correctness input.
-     * The heartbeat uses {@code expires_at_ms - dateMs} only as a first-beat
-     * cadence hint when a tenant policy may have silently capped the requested TTL.
+     * {@code expires_at_ms} — so it must never be used as a lease-scheduling
+     * correctness input. Heartbeats use {@code remaining_ttl_ms} when present
+     * and the documented monotonic fallback otherwise.
      *
      * @return the {@code Date} header in epoch milliseconds, or {@code null} when
      *         absent or unparseable

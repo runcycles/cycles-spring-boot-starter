@@ -148,10 +148,10 @@ public class CyclesAutoConfiguration {
 
     /**
      * Registers the lifecycle service orchestrating reserve/execute/commit.
-     * The enforced per-attempt HTTP timeout (connect + read, the bound the
-     * {@code cyclesWebClient} actually enforces via Reactor Netty) is wired in
-     * so the heartbeat's {@code remaining_ttl_ms} schedule can reserve retry
-     * budget from it, per the spec's HEARTBEAT GUIDANCE.
+     * The configured connect + read budget is wired into the lifecycle as a
+     * complete-attempt outer deadline. That deadline includes pool wait,
+     * request write, response reads, and body decoding, and also protects
+     * custom {@link CyclesClient} beans.
      *
      * @param client                the Cycles API client
      * @param retryEngine           the commit retry engine

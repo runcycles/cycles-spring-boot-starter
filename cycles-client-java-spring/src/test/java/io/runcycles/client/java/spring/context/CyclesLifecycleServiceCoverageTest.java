@@ -115,7 +115,7 @@ class CyclesLifecycleServiceCoverageTest {
             assertThatThrownBy(() -> service.executeWithReservation(
                     () -> "ok", cycles, method, new Object[]{100}, this, "llm", "complete"))
                     .isInstanceOf(CyclesProtocolException.class)
-                    .hasMessageContaining("parse");
+                    .hasMessageContaining("schema-valid HTTP 200");
         }
     }
 
@@ -146,7 +146,7 @@ class CyclesLifecycleServiceCoverageTest {
             assertThatThrownBy(() -> service.executeWithReservation(
                     () -> "ok", cycles, method, new Object[]{100}, this, "llm", "complete"))
                     .isInstanceOf(CyclesProtocolException.class)
-                    .hasMessageContaining("Unrecognized decision");
+                    .hasMessageContaining("schema-valid HTTP 200");
         }
     }
 
@@ -495,6 +495,7 @@ class CyclesLifecycleServiceCoverageTest {
 
             Map<String, Object> body = new HashMap<>();
             body.put("decision", "DENY");
+            body.put("affected_scopes", List.of());
             // No reason_code
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, body));
@@ -525,6 +526,7 @@ class CyclesLifecycleServiceCoverageTest {
 
             Map<String, Object> body = new HashMap<>();
             body.put("decision", "DENY");
+            body.put("affected_scopes", List.of());
             // No reason_code, no retry_after_ms
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, body));

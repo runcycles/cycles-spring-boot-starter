@@ -10,8 +10,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Method;
+import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -105,6 +107,7 @@ class CyclesLifecycleServiceTest {
     private Map<String, Object> denyResponse() {
         Map<String, Object> body = new HashMap<>();
         body.put("decision", "DENY");
+        body.put("affected_scopes", List.of("tenant:test-tenant"));
         body.put("reason_code", "BUDGET_EXCEEDED");
         body.put("retry_after_ms", 5000);
         return body;
@@ -1121,6 +1124,7 @@ class CyclesLifecycleServiceTest {
             Map<String, Object> responseWithoutId = new HashMap<>();
             responseWithoutId.put("decision", "ALLOW");
             responseWithoutId.put("expires_at_ms", System.currentTimeMillis() + 60000);
+            responseWithoutId.put("affected_scopes", List.of("tenant:test-tenant"));
             // no reservation_id
 
             when(client.createReservation(any(Object.class)))
@@ -1968,10 +1972,9 @@ class CyclesLifecycleServiceTest {
         }
 
         @Test
-        void shouldFallBackToRequestedTtlGrantWhenExpiryMissingFrom2xx() throws Throwable {
-            // Any 2xx counts as applied. When the body is missing or lacks expires_at_ms,
-            // the service records a requested-ttl grant (prevExpiry += requested) and
-            // keeps beating.
+        void shouldKeepSameKeyAndStateWhen2xxIsNotSchemaValid() throws Throwable {
+            // A 200 without the required response body/expires_at_ms is
+            // ambiguous, not an observed success.
             useClockedService();
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
@@ -1991,9 +1994,9 @@ class CyclesLifecycleServiceTest {
                     () -> {
                         capturedCtx.set(CyclesContextHolder.get());
                         Runnable beat = capturedHeartbeat.get();
-                        beat.run(); // beat 1 at t=0: 2xx, null body -> grant = requested, prevExpiry = initial + 20000
+                        beat.run(); // ambiguous: keep key and expiry
                         advanceClockMs(10000);
-                        beat.run(); // beat 2: leadMin 10000 < 30000 -> extend; 2xx missing expiry -> += requested again
+                        beat.run(); // retry the same key; still ambiguous
                         return "ok";
                     },
                     cycles, method, args, target,
@@ -2001,7 +2004,15 @@ class CyclesLifecycleServiceTest {
             );
 
             verify(client, times(2)).extendReservation(eq("res-noexp"), any(Object.class));
-            assertThat(capturedCtx.get().getExpiresAtMs()).isEqualTo(initialExpiry + 40000L);
+            assertThat(capturedCtx.get().getExpiresAtMs()).isEqualTo(initialExpiry);
+            ArgumentCaptor<Object> bodies = ArgumentCaptor.forClass(Object.class);
+            verify(client, times(2)).extendReservation(eq("res-noexp"), bodies.capture());
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> sent = bodies.getAllValues().stream()
+                    .map(value -> (Map<String, Object>) value)
+                    .toList();
+            assertThat(sent.get(0).get("idempotency_key"))
+                    .isEqualTo(sent.get(1).get("idempotency_key"));
         }
 
         // NOTE: v2.2 derived a first-beat delay from the HTTP Date header
@@ -2214,7 +2225,7 @@ class CyclesLifecycleServiceTest {
 
         // ------------------------------------------------------------------
         // Server-authoritative remaining_ttl_ms scheduling (spec PR #148,
-        // HEARTBEAT GUIDANCE at head dd60c27). Unless stated otherwise the tests
+        // HEARTBEAT GUIDANCE in spec PR #148). Unless stated otherwise the tests
         // use a known 5000ms per-attempt timeout, rtt 0: attemptBudget = 5000,
         // safetyMargin = 1000, retryReserve = 2x5000+1000 = 11000.
         // ------------------------------------------------------------------
@@ -2244,6 +2255,32 @@ class CyclesLifecycleServiceTest {
                     .thenReturn(Map.of("idempotency_key", "com-1"));
             when(client.commitReservation(anyString(), any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+        }
+
+        @Test
+        void shouldDeductLocalSetupTimeAfterCreateReceiptFromFirstDelay() throws Throwable {
+            useClockedService(5000L);
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenAnswer(inv -> {
+                advanceClockMs(2000L);
+                return 20000L;
+            });
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            stubHeartbeatLifecycleWithRemaining("res-field-setup", 1_000_000L, 60000L);
+            captureHeartbeat();
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            // lead at receipt 60000, then 2000ms of local setup, less the
+            // 11000ms reserve: schedule 47000ms from now, not 49000ms.
+            assertThat(scheduledDelays).containsExactly(47000L);
         }
 
         @Test
@@ -2845,6 +2882,43 @@ class CyclesLifecycleServiceTest {
         }
 
         @Test
+        void shouldStopOnUnexpected3xxInFieldMode() throws Throwable {
+            useClockedService(5000L);
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            stubHeartbeatLifecycleWithRemaining("res-302", 1_000_000L, 60000L);
+            when(client.extendReservation(eq("res-302"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(302, "Redirect", Map.of()));
+
+            var appender = attachWarnAppender();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            Runnable beat = capturedHeartbeat.get();
+                            advanceClockMs(9000);
+                            beat.run();
+                            beat.run();
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
+
+            verify(client, times(1)).extendReservation(eq("res-302"), any(Object.class));
+            assertThat(scheduledDelays).containsExactly(49000L);
+            verify(heartbeatFuture, atLeastOnce()).cancel(false);
+            assertThat(warnCount(appender, "unexpected HTTP status 302")).isEqualTo(1);
+        }
+
+        @Test
         void shouldSubtractRttAndWidenReserveFromObservedRtt() throws Throwable {
             // rtt handling: the extend takes 2000ms on the clock, so leadFloor =
             // 60000 - 2000 = 58000 and maxObservedRtt = 2000 widens both budget terms:
@@ -2949,6 +3023,144 @@ class CyclesLifecycleServiceTest {
     }
 
     // ========================================================================
+    // Strict lease response contract
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Strict lease response contract")
+    class StrictLeaseResponseContract {
+
+        @Test
+        void shouldRecoverOneAmbiguousCreateWithTheSameBodyAndKey() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Map<String, Object> request = new HashMap<>();
+            request.put("idempotency_key", "same-key");
+            Map<String, Object> response = new HashMap<>();
+            response.put("decision", "ALLOW");
+            response.put("reservation_id", "res-create-recovery");
+            response.put("affected_scopes", List.of("tenant:test-tenant"));
+
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(
+                    any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(request);
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(202, response))
+                    .thenReturn(CyclesResponse.success(200, response));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "commit-key"));
+            when(client.commitReservation(eq("res-create-recovery"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+
+            assertThat(service.executeWithReservation(
+                    () -> "ok", cycles, method, new Object[]{100}, this,
+                    "llm", "complete")).isEqualTo("ok");
+
+            ArgumentCaptor<Object> bodies = ArgumentCaptor.forClass(Object.class);
+            verify(client, times(2)).createReservation(bodies.capture());
+            assertThat(bodies.getAllValues().get(0)).isSameAs(request);
+            assertThat(bodies.getAllValues().get(1)).isSameAs(request);
+        }
+
+        @Test
+        void shouldEnforceCompleteAttemptDeadlineForCustomClient() {
+            service = new CyclesLifecycleService(
+                    client, retryEngine, requestBuilderService, evaluator, heartbeatExecutor,
+                    System::nanoTime, 10L);
+            Cycles cycles = mockCycles(false);
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(
+                    any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "same-key"));
+            when(client.createReservation(any(Object.class))).thenAnswer(invocation -> {
+                Thread.sleep(1_000L);
+                return CyclesResponse.success(200, allowResponse("too-late"));
+            });
+
+            assertThatThrownBy(() -> service.executeWithReservation(
+                    () -> "never", cycles, dummyMethod(), new Object[]{100}, this,
+                    "llm", "complete"))
+                    .isInstanceOf(CyclesProtocolException.class)
+                    .hasMessageContaining("same-key retry");
+            verify(client, times(2)).createReservation(any(Object.class));
+        }
+
+        @Test
+        void shouldValidateFullCreateAndExtendSchemas() {
+            Map<String, Object> balance = new HashMap<>();
+            balance.put("scope", "tenant:test-tenant");
+            balance.put("scope_path", "tenant:test-tenant");
+            balance.put("remaining", Map.of("unit", "TOKENS", "amount", -1L));
+            balance.put("reserved", Map.of("unit", "TOKENS", "amount", 1L));
+
+            Map<String, Object> create = new HashMap<>();
+            create.put("decision", "ALLOW");
+            create.put("reservation_id", "res-strict");
+            create.put("affected_scopes", List.of("tenant:test-tenant"));
+            create.put("remaining_ttl_ms", 0L);
+            create.put("balances", List.of(balance));
+            create.put("cycles_evidence", Map.of(
+                    "evidence_id", "a".repeat(64),
+                    "cycles_evidence_url", "https://cycles.example/v1/evidence/id"));
+            assertThat(CyclesLifecycleService.isSchemaValidCreateResponse(
+                    CyclesResponse.success(200, create))).isTrue();
+            CyclesEvidenceRef evidence = ReservationResult.fromMap(create).getCyclesEvidence();
+            assertThat(evidence.getEvidenceId()).isEqualTo("a".repeat(64));
+            assertThat(evidence.getCyclesEvidenceUrl())
+                    .isEqualTo("https://cycles.example/v1/evidence/id");
+
+            Map<String, Object> extend = new HashMap<>();
+            extend.put("status", "ACTIVE");
+            extend.put("expires_at_ms", 1L);
+            extend.put("remaining_ttl_ms", 0L);
+            extend.put("balances", List.of(balance));
+            assertThat(CyclesLifecycleService.isSchemaValidExtendResponse(
+                    CyclesResponse.success(200, extend))).isTrue();
+
+            Map<String, Object> extra = new HashMap<>(extend);
+            extra.put("unexpected", true);
+            assertThat(CyclesLifecycleService.isSchemaValidExtendResponse(
+                    CyclesResponse.success(200, extra))).isFalse();
+
+            Map<String, Object> negative = new HashMap<>(extend);
+            negative.put("remaining_ttl_ms", -1L);
+            assertThat(CyclesLifecycleService.isSchemaValidExtendResponse(
+                    CyclesResponse.success(200, negative))).isFalse();
+
+            Map<String, Object> malformedBalance = new HashMap<>(extend);
+            malformedBalance.put("balances", List.of(Map.of("scope", "missing-required-fields")));
+            assertThat(CyclesLifecycleService.isSchemaValidExtendResponse(
+                    CyclesResponse.success(200, malformedBalance))).isFalse();
+
+            assertThat(CyclesLifecycleService.isSchemaValidExtendResponse(
+                    CyclesResponse.success(202, extend))).isFalse();
+
+            Map<String, Object> nullCaps = new HashMap<>(create);
+            nullCaps.put("caps", null);
+            assertThat(CyclesLifecycleService.isSchemaValidCreateResponse(
+                    CyclesResponse.success(200, nullCaps))).isFalse();
+
+            Map<String, Object> negativeCreateExpiry = new HashMap<>(create);
+            negativeCreateExpiry.put("expires_at_ms", -1L);
+            assertThat(CyclesLifecycleService.isSchemaValidCreateResponse(
+                    CyclesResponse.success(200, negativeCreateExpiry))).isFalse();
+
+            Map<String, Object> overflow = new HashMap<>(extend);
+            overflow.put("remaining_ttl_ms", BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE));
+            assertThat(CyclesLifecycleService.isSchemaValidExtendResponse(
+                    CyclesResponse.success(200, overflow))).isFalse();
+
+            Map<String, Object> nestedNull = new HashMap<>(balance);
+            nestedNull.put("debt", null);
+            Map<String, Object> nullBalance = new HashMap<>(extend);
+            nullBalance.put("balances", List.of(nestedNull));
+            assertThat(CyclesLifecycleService.isSchemaValidExtendResponse(
+                    CyclesResponse.success(200, nullBalance))).isFalse();
+        }
+    }
+
+    // ========================================================================
     // Null decision from server
     // ========================================================================
 
@@ -2982,7 +3194,7 @@ class CyclesLifecycleServiceTest {
                     "llm", "complete"
             ))
                     .isInstanceOf(CyclesProtocolException.class)
-                    .hasMessageContaining("Unrecognized decision");
+                    .hasMessageContaining("schema-valid HTTP 200");
         }
     }
 
@@ -3015,7 +3227,7 @@ class CyclesLifecycleServiceTest {
                     "llm", "complete"
             ))
                     .isInstanceOf(CyclesProtocolException.class)
-                    .hasMessageContaining("parse reservation response");
+                    .hasMessageContaining("schema-valid HTTP 200");
         }
     }
 

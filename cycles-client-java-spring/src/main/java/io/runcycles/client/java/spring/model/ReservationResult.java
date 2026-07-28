@@ -19,13 +19,15 @@ public class ReservationResult {
     private final String reasonCode;
     private final Integer retryAfterMs;
     private final List<Balance> balances;
+    private final CyclesEvidenceRef cyclesEvidence;
 
     private ReservationResult(Decision decision, String reservationId,
                               List<String> affectedScopes, Long expiresAtMs,
                               Long remainingTtlMs,
                               String scopePath, Amount reserved, Caps caps,
                               String reasonCode, Integer retryAfterMs,
-                              List<Balance> balances) {
+                              List<Balance> balances,
+                              CyclesEvidenceRef cyclesEvidence) {
         this.decision = decision;
         this.reservationId = reservationId;
         this.affectedScopes = affectedScopes;
@@ -37,6 +39,7 @@ public class ReservationResult {
         this.reasonCode = reasonCode;
         this.retryAfterMs = retryAfterMs;
         this.balances = balances;
+        this.cyclesEvidence = cyclesEvidence;
     }
 
     /**
@@ -59,7 +62,10 @@ public class ReservationResult {
                 Caps.fromMap(map.get("caps") instanceof Map<?, ?> m ? (Map<String, Object>) m : null),
                 map.get("reason_code") instanceof String s ? s : null,
                 map.get("retry_after_ms") instanceof Number n ? n.intValue() : null,
-                Balance.listFromRaw(map.get("balances") instanceof List<?> l ? l : null)
+                Balance.listFromRaw(map.get("balances") instanceof List<?> l ? l : null),
+                CyclesEvidenceRef.fromMap(
+                        map.get("cycles_evidence") instanceof Map<?, ?> m
+                                ? (Map<String, Object>) m : null)
         );
     }
 
@@ -132,6 +138,12 @@ public class ReservationResult {
      * @return The updated balances after the reservation
      */
     public List<Balance> getBalances() { return balances; }
+    /**
+     * Returns the signed-evidence reference emitted for the reserve operation.
+     *
+     * @return the evidence reference, or {@code null} when evidence emission is disabled
+     */
+    public CyclesEvidenceRef getCyclesEvidence() { return cyclesEvidence; }
 
     /**
      * Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}.

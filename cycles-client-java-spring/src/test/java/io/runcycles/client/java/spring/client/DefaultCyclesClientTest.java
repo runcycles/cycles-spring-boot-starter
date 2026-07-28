@@ -154,9 +154,24 @@ class DefaultCyclesClientTest {
         }
 
         @Test
-        void shouldClampRetryAfterHeaderToOneHour() throws Exception {
-            // 999999999999 seconds would overflow int millis; the parsed value is
-            // clamped to 1h (3_600_000 ms) instead of overflowing or being trusted.
+        void shouldRejectSignedRetryAfterHeader() throws Exception {
+            server.enqueue(new MockResponse()
+                    .setResponseCode(429)
+                    .setHeader("Content-Type", "application/json")
+                    .setHeader("Retry-After", "+5")
+                    .setBody(mapper.writeValueAsString(Map.of(
+                            "error", "LIMIT_EXCEEDED", "message", "Rate limited",
+                            "request_id", "req-1"))));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
+                    "idempotency_key", "idem-1"));
+
+            assertThat(resp.getRetryAfterMs()).isNull();
+        }
+
+        @Test
+        void shouldRejectUnrepresentableRetryAfterHeader() throws Exception {
+            // Shortening this value would retry before the server permitted it.
             server.enqueue(new MockResponse()
                     .setResponseCode(429)
                     .setHeader("Content-Type", "application/json")
@@ -168,7 +183,7 @@ class DefaultCyclesClientTest {
                     "idempotency_key", "idem-1"));
 
             assertThat(resp.getStatus()).isEqualTo(429);
-            assertThat(resp.getRetryAfterMs()).isEqualTo(3_600_000);
+            assertThat(resp.getRetryAfterMs()).isNull();
         }
 
         @Test
@@ -219,8 +234,8 @@ class DefaultCyclesClientTest {
         }
 
         @Test
-        void shouldClampModeratelyLargeRetryAfterHeaderToOneHour() throws Exception {
-            // 7200s (2h) parses fine but still exceeds the 1h cap
+        void shouldPreserveRepresentableRetryAfterHeader() throws Exception {
+            // A long but representable server delay must not be shortened.
             server.enqueue(new MockResponse()
                     .setResponseCode(429)
                     .setHeader("Content-Type", "application/json")
@@ -231,7 +246,7 @@ class DefaultCyclesClientTest {
             CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
                     "idempotency_key", "idem-1"));
 
-            assertThat(resp.getRetryAfterMs()).isEqualTo(3_600_000);
+            assertThat(resp.getRetryAfterMs()).isEqualTo(7_200_000);
         }
     }
 
