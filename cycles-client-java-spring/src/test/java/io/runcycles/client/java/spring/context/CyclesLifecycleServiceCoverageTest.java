@@ -49,8 +49,8 @@ class CyclesLifecycleServiceCoverageTest {
         evaluator = mock(CyclesExpressionEvaluator.class);
         requestBuilderService = mock(CyclesRequestBuilderService.class);
         heartbeatExecutor = mock(ScheduledExecutorService.class);
-        when(heartbeatExecutor.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
-                .thenReturn(mock(ScheduledFuture.class));
+        when(heartbeatExecutor.schedule(any(Runnable.class), anyLong(), any(TimeUnit.class)))
+                .thenAnswer(inv -> mock(ScheduledFuture.class));
         service = new CyclesLifecycleService(client, retryEngine, requestBuilderService, evaluator, heartbeatExecutor);
     }
 
@@ -115,7 +115,7 @@ class CyclesLifecycleServiceCoverageTest {
             assertThatThrownBy(() -> service.executeWithReservation(
                     () -> "ok", cycles, method, new Object[]{100}, this, "llm", "complete"))
                     .isInstanceOf(CyclesProtocolException.class)
-                    .hasMessageContaining("parse");
+                    .hasMessageContaining("schema-valid HTTP 200");
         }
     }
 
@@ -146,7 +146,7 @@ class CyclesLifecycleServiceCoverageTest {
             assertThatThrownBy(() -> service.executeWithReservation(
                     () -> "ok", cycles, method, new Object[]{100}, this, "llm", "complete"))
                     .isInstanceOf(CyclesProtocolException.class)
-                    .hasMessageContaining("Unrecognized decision");
+                    .hasMessageContaining("schema-valid HTTP 200");
         }
     }
 
@@ -396,7 +396,7 @@ class CyclesLifecycleServiceCoverageTest {
             service.executeWithReservation(
                     () -> "ok", cycles, method, new Object[]{100}, this, "llm", "complete");
 
-            verify(heartbeatExecutor, never()).scheduleAtFixedRate(any(), anyLong(), anyLong(), any());
+            verify(heartbeatExecutor, never()).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
         }
 
         @Test
@@ -419,7 +419,7 @@ class CyclesLifecycleServiceCoverageTest {
             service.executeWithReservation(
                     () -> "ok", cycles, method, new Object[]{100}, this, "llm", "complete");
 
-            verify(heartbeatExecutor, never()).scheduleAtFixedRate(any(), anyLong(), anyLong(), any());
+            verify(heartbeatExecutor, never()).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
         }
     }
 
@@ -495,6 +495,7 @@ class CyclesLifecycleServiceCoverageTest {
 
             Map<String, Object> body = new HashMap<>();
             body.put("decision", "DENY");
+            body.put("affected_scopes", List.of());
             // No reason_code
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, body));
@@ -525,6 +526,7 @@ class CyclesLifecycleServiceCoverageTest {
 
             Map<String, Object> body = new HashMap<>();
             body.put("decision", "DENY");
+            body.put("affected_scopes", List.of());
             // No reason_code, no retry_after_ms
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, body));
@@ -573,8 +575,10 @@ class CyclesLifecycleServiceCoverageTest {
                     },
                     cycles, method, new Object[]{100}, this, "llm", "complete");
 
-            // Verify the commit was called (metrics were included)
-            verify(requestBuilderService).buildCommit(eq(cycles), eq(1000L), any(CyclesMetrics.class), eq(Map.of("trace", "abc")));
+            // Verify the commit was called (metrics were included); the estimate-fallback
+            // marker is merged into the user-provided commit metadata
+            verify(requestBuilderService).buildCommit(eq(cycles), eq(1000L), any(CyclesMetrics.class),
+                    eq(Map.of("trace", "abc", "actual_source", "estimate")));
         }
     }
 }

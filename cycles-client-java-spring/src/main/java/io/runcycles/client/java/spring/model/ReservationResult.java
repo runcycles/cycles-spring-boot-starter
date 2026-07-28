@@ -12,28 +12,34 @@ public class ReservationResult {
     private final String reservationId;
     private final List<String> affectedScopes;
     private final Long expiresAtMs;
+    private final Long remainingTtlMs;
     private final String scopePath;
     private final Amount reserved;
     private final Caps caps;
     private final String reasonCode;
     private final Integer retryAfterMs;
     private final List<Balance> balances;
+    private final CyclesEvidenceRef cyclesEvidence;
 
     private ReservationResult(Decision decision, String reservationId,
                               List<String> affectedScopes, Long expiresAtMs,
+                              Long remainingTtlMs,
                               String scopePath, Amount reserved, Caps caps,
                               String reasonCode, Integer retryAfterMs,
-                              List<Balance> balances) {
+                              List<Balance> balances,
+                              CyclesEvidenceRef cyclesEvidence) {
         this.decision = decision;
         this.reservationId = reservationId;
         this.affectedScopes = affectedScopes;
         this.expiresAtMs = expiresAtMs;
+        this.remainingTtlMs = remainingTtlMs;
         this.scopePath = scopePath;
         this.reserved = reserved;
         this.caps = caps;
         this.reasonCode = reasonCode;
         this.retryAfterMs = retryAfterMs;
         this.balances = balances;
+        this.cyclesEvidence = cyclesEvidence;
     }
 
     /**
@@ -50,12 +56,16 @@ public class ReservationResult {
                 map.get("reservation_id") instanceof String s ? s : null,
                 map.get("affected_scopes") instanceof List<?> l ? (List<String>) l : List.of(),
                 map.get("expires_at_ms") instanceof Number n ? n.longValue() : null,
+                map.get("remaining_ttl_ms") instanceof Number n ? n.longValue() : null,
                 map.get("scope_path") instanceof String s ? s : null,
                 map.get("reserved") instanceof Map<?, ?> m ? Amount.fromMap((Map<String, Object>) m) : null,
                 Caps.fromMap(map.get("caps") instanceof Map<?, ?> m ? (Map<String, Object>) m : null),
                 map.get("reason_code") instanceof String s ? s : null,
                 map.get("retry_after_ms") instanceof Number n ? n.intValue() : null,
-                Balance.listFromRaw(map.get("balances") instanceof List<?> l ? l : null)
+                Balance.listFromRaw(map.get("balances") instanceof List<?> l ? l : null),
+                CyclesEvidenceRef.fromMap(
+                        map.get("cycles_evidence") instanceof Map<?, ?> m
+                                ? (Map<String, Object>) m : null)
         );
     }
 
@@ -83,6 +93,15 @@ public class ReservationResult {
      * @return The expiration time in epoch milliseconds
      */
     public Long getExpiresAtMs() { return expiresAtMs; }
+    /**
+     * Returns the remaining reservation lifetime in milliseconds at the moment the
+     * server evaluated the response (same clock snapshot as {@code expires_at_ms}),
+     * or {@code null} when absent (dry-run/DENY responses, or a server that
+     * predates spec PR #148).
+     *
+     * @return The remaining reservation lifetime in milliseconds, or {@code null}
+     */
+    public Long getRemainingTtlMs() { return remainingTtlMs; }
     /**
      * Returns the fully-qualified scope path.
      *
@@ -119,6 +138,12 @@ public class ReservationResult {
      * @return The updated balances after the reservation
      */
     public List<Balance> getBalances() { return balances; }
+    /**
+     * Returns the signed-evidence reference emitted for the reserve operation.
+     *
+     * @return the evidence reference, or {@code null} when evidence emission is disabled
+     */
+    public CyclesEvidenceRef getCyclesEvidence() { return cyclesEvidence; }
 
     /**
      * Returns {@code true} if the decision is {@code ALLOW} or {@code ALLOW_WITH_CAPS}.

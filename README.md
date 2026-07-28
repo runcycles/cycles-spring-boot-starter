@@ -16,7 +16,7 @@ Reserve budget around guarded method executions using a **reserve / execute / co
 <dependency>
     <groupId>io.runcycles</groupId>
     <artifactId>cycles-client-java-spring</artifactId>
-    <version>0.2.5</version>
+    <version>0.3.1</version>
 </dependency>
 ```
 
@@ -88,7 +88,7 @@ public String generateText(String prompt, int tokens) { ... }
 │     │   → throw CyclesProtocolException (method never runs)     │
 │     ├─ 200 ALLOW → reservation created, continue                │
 │     └─ 200 ALLOW_WITH_CAPS → Caps available via context         │
-│  3. Start heartbeat (POST .../extend at ttlMs/2 intervals)      │
+│  3. Start heartbeat (POST .../extend, grant-adaptive cadence)   │
 │  4. Execute the guarded method                                  │
 │     ├─ Success → evaluate actual expression                     │
 │     │    POST /v1/reservations/{reservation_id}/commit          │
@@ -367,7 +367,7 @@ public class TenantResolver implements CyclesFieldResolver {
 
 ## Heartbeat (Automatic TTL Extension)
 
-For long-running methods, the starter automatically extends the reservation TTL via the `/v1/reservations/{reservation_id}/extend` endpoint. The heartbeat fires at `ttlMs / 2` intervals to prevent the reservation from expiring while the method is still executing.
+For long-running methods, the starter automatically extends the reservation TTL via the `/v1/reservations/{reservation_id}/extend` endpoint. When the server reports `remaining_ttl_ms` on create/extend responses (spec PR #148), the starter implements the spec's normative primary algorithm: each beat fires `remaining_ttl_ms` minus a retry reserve of two attempt budgets plus a safety margin — the attempt budget is the enforced per-attempt HTTP timeout (`cycles.http.connect-timeout` + `cycles.http.read-timeout`) widened by observed round-trip times — recomputed from every schema-valid 200 response; ambiguous responses and transient failures recover with the same idempotency key strictly inside the provably safe retry window (429 `Retry-After` is honored only when it fits), and the heartbeat stops and surfaces the condition when the lease is shorter than the retry-safety budget or no safe retry exists. Keep the HTTP timeouts small relative to your reservation TTLs (two attempt budgets plus one second must fit inside the granted lease), or field-mode beats degrade to a single immediate extension followed by a surfaced stop. Against older servers that omit the field, the starter falls back to a best-effort heuristic: the first beat fires immediately (a tenant policy may have silently capped the granted TTL far below the requested one, so no bounded first delay is safe); after that, beats self-reschedule at half the *observed* grant — the difference between successive `expires_at_ms` values returned by the server — and a beat is skipped while the accumulated grants prove the reservation still leads the clock by at least 1.5× the last grant. When extends stop gaining lease (expiry held in place by a depleting budget), the fallback cadence holds at `min(ttlMs/2, 30s)` instead of tightening and a single warning flags the likely budget depletion. This keeps the reservation alive without drifting its expiry ahead of the client or burning the server's capped extension count.
 
 No configuration needed — it activates automatically when the server returns an `expires_at_ms` in the reservation response.
 

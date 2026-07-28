@@ -591,6 +591,7 @@ class ModelCoverageTest {
             ExtendResult r = ExtendResult.fromMap(Map.of());
             assertThat(r.getStatus()).isNull();
             assertThat(r.getExpiresAtMs()).isNull();
+            assertThat(r.getRemainingTtlMs()).isNull();
             assertThat(r.getBalances()).isNull();
         }
 
@@ -604,12 +605,23 @@ class ModelCoverageTest {
             Map<String, Object> raw = new HashMap<>();
             raw.put("status", 123);
             raw.put("expires_at_ms", "not-num");
+            raw.put("remaining_ttl_ms", "not-num");
             raw.put("balances", "not-list");
 
             ExtendResult r = ExtendResult.fromMap(raw);
             assertThat(r.getStatus()).isNull();
             assertThat(r.getExpiresAtMs()).isNull();
+            assertThat(r.getRemainingTtlMs()).isNull();
             assertThat(r.getBalances()).isNull();
+        }
+
+        @Test
+        void fromMapParsesRemainingTtlMs() {
+            // spec PR #148: remaining reservation lifetime at response evaluation,
+            // same clock snapshot as expires_at_ms.
+            ExtendResult r = ExtendResult.fromMap(Map.of(
+                    "status", "ACTIVE", "expires_at_ms", 1_000_000L, "remaining_ttl_ms", 60000));
+            assertThat(r.getRemainingTtlMs()).isEqualTo(60000L);
         }
     }
 
@@ -767,12 +779,22 @@ class ModelCoverageTest {
             assertThat(r.getReservationId()).isNull();
             assertThat(r.getAffectedScopes()).isEmpty();
             assertThat(r.getExpiresAtMs()).isNull();
+            assertThat(r.getRemainingTtlMs()).isNull();
             assertThat(r.getScopePath()).isNull();
             assertThat(r.getReserved()).isNull();
             assertThat(r.getCaps()).isNull();
             assertThat(r.getReasonCode()).isNull();
             assertThat(r.getRetryAfterMs()).isNull();
             assertThat(r.getBalances()).isNull();
+        }
+
+        @Test
+        void fromMapParsesRemainingTtlMs() {
+            // spec PR #148: present on successful live-reservation responses,
+            // absent on dry-run/DENY.
+            ReservationResult r = ReservationResult.fromMap(Map.of(
+                    "decision", "ALLOW", "expires_at_ms", 1_000_000L, "remaining_ttl_ms", 60000));
+            assertThat(r.getRemainingTtlMs()).isEqualTo(60000L);
         }
 
         @Test

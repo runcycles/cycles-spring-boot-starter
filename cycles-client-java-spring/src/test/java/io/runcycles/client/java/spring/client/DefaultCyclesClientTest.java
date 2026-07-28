@@ -154,9 +154,24 @@ class DefaultCyclesClientTest {
         }
 
         @Test
-        void shouldClampRetryAfterHeaderToOneHour() throws Exception {
-            // 999999999999 seconds would overflow int millis; the parsed value is
-            // clamped to 1h (3_600_000 ms) instead of overflowing or being trusted.
+        void shouldRejectSignedRetryAfterHeader() throws Exception {
+            server.enqueue(new MockResponse()
+                    .setResponseCode(429)
+                    .setHeader("Content-Type", "application/json")
+                    .setHeader("Retry-After", "+5")
+                    .setBody(mapper.writeValueAsString(Map.of(
+                            "error", "LIMIT_EXCEEDED", "message", "Rate limited",
+                            "request_id", "req-1"))));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
+                    "idempotency_key", "idem-1"));
+
+            assertThat(resp.getRetryAfterMs()).isNull();
+        }
+
+        @Test
+        void shouldRejectUnrepresentableRetryAfterHeader() throws Exception {
+            // Shortening this value would retry before the server permitted it.
             server.enqueue(new MockResponse()
                     .setResponseCode(429)
                     .setHeader("Content-Type", "application/json")
@@ -168,12 +183,59 @@ class DefaultCyclesClientTest {
                     "idempotency_key", "idem-1"));
 
             assertThat(resp.getStatus()).isEqualTo(429);
-            assertThat(resp.getRetryAfterMs()).isEqualTo(3_600_000);
+            assertThat(resp.getRetryAfterMs()).isNull();
         }
 
         @Test
-        void shouldClampModeratelyLargeRetryAfterHeaderToOneHour() throws Exception {
-            // 7200s (2h) parses fine but still exceeds the 1h cap
+        void shouldCaptureDateHeaderAsEpochMillisOnSuccess() throws Exception {
+            String httpDate = "Wed, 21 Oct 2026 07:28:00 GMT";
+            server.enqueue(new MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setHeader("Date", httpDate)
+                    .setBody(mapper.writeValueAsString(Map.of(
+                            "decision", "ALLOW", "reservation_id", "res-1"))));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
+                    "idempotency_key", "idem-1"));
+
+            long expected = java.time.ZonedDateTime
+                    .parse(httpDate, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME)
+                    .toInstant().toEpochMilli();
+            assertThat(resp.is2xx()).isTrue();
+            assertThat(resp.getDateMs()).isEqualTo(expected);
+        }
+
+        @Test
+        void shouldReturnNullDateMsWhenDateHeaderAbsent() throws Exception {
+            enqueueJson(200, Map.of("decision", "ALLOW", "reservation_id", "res-1"));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
+                    "idempotency_key", "idem-1"));
+
+            assertThat(resp.is2xx()).isTrue();
+            assertThat(resp.getDateMs()).isNull();
+        }
+
+        @Test
+        void shouldReturnNullDateMsWhenDateHeaderGarbage() throws Exception {
+            server.enqueue(new MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setHeader("Date", "not-a-date")
+                    .setBody(mapper.writeValueAsString(Map.of(
+                            "decision", "ALLOW", "reservation_id", "res-1"))));
+
+            CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
+                    "idempotency_key", "idem-1"));
+
+            assertThat(resp.is2xx()).isTrue();
+            assertThat(resp.getDateMs()).isNull();
+        }
+
+        @Test
+        void shouldPreserveRepresentableRetryAfterHeader() throws Exception {
+            // A long but representable server delay must not be shortened.
             server.enqueue(new MockResponse()
                     .setResponseCode(429)
                     .setHeader("Content-Type", "application/json")
@@ -184,7 +246,7 @@ class DefaultCyclesClientTest {
             CyclesResponse<Map<String, Object>> resp = client.createReservation(Map.of(
                     "idempotency_key", "idem-1"));
 
-            assertThat(resp.getRetryAfterMs()).isEqualTo(3_600_000);
+            assertThat(resp.getRetryAfterMs()).isEqualTo(7_200_000);
         }
     }
 

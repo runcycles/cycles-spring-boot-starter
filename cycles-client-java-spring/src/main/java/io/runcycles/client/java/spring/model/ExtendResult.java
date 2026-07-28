@@ -11,11 +11,14 @@ import java.util.Map;
 public class ExtendResult {
     private final ExtendStatus status;
     private final Long expiresAtMs;
+    private final Long remainingTtlMs;
     private final List<Balance> balances;
 
-    private ExtendResult(ExtendStatus status, Long expiresAtMs, List<Balance> balances) {
+    private ExtendResult(ExtendStatus status, Long expiresAtMs, Long remainingTtlMs,
+                         List<Balance> balances) {
         this.status = status;
         this.expiresAtMs = expiresAtMs;
+        this.remainingTtlMs = remainingTtlMs;
         this.balances = balances;
     }
 
@@ -31,6 +34,7 @@ public class ExtendResult {
         return new ExtendResult(
                 ExtendStatus.fromString(map.get("status") instanceof String s ? s : null),
                 map.get("expires_at_ms") instanceof Number n ? n.longValue() : null,
+                map.get("remaining_ttl_ms") instanceof Number n ? n.longValue() : null,
                 Balance.listFromRaw(map.get("balances") instanceof List<?> l ? l : null)
         );
     }
@@ -47,6 +51,14 @@ public class ExtendResult {
      * @return The new expiration time in epoch milliseconds
      */
     public Long getExpiresAtMs() { return expiresAtMs; }
+    /**
+     * Returns the remaining reservation lifetime in milliseconds at the moment the
+     * server evaluated the response (same clock snapshot as {@code expires_at_ms}),
+     * or {@code null} when the server predates spec PR #148 and omits the field.
+     *
+     * @return The remaining reservation lifetime in milliseconds, or {@code null}
+     */
+    public Long getRemainingTtlMs() { return remainingTtlMs; }
     /**
      * Returns the updated balances after the extension.
      *

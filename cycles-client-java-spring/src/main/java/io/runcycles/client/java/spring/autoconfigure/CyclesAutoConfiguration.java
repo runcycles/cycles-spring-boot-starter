@@ -22,6 +22,7 @@ import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
 
+import java.time.Duration;
 import java.util.Map;
 
 /**
@@ -147,11 +148,16 @@ public class CyclesAutoConfiguration {
 
     /**
      * Registers the lifecycle service orchestrating reserve/execute/commit.
+     * The configured connect + read budget is wired into the lifecycle as a
+     * complete-attempt outer deadline. That deadline includes pool wait,
+     * request write, response reads, and body decoding, and also protects
+     * custom {@link CyclesClient} beans.
      *
      * @param client                the Cycles API client
      * @param retryEngine           the commit retry engine
      * @param requestBuilderService the request builder service
      * @param evaluator             the SpEL expression evaluator
+     * @param props                 the Cycles configuration properties
      * @return the lifecycle service
      */
     @Bean
@@ -159,8 +165,13 @@ public class CyclesAutoConfiguration {
     public CyclesLifecycleService cyclesLifecycleService(CyclesClient client,
                                                          CommitRetryEngine retryEngine,
                                                          CyclesRequestBuilderService requestBuilderService,
-                                                         CyclesExpressionEvaluator evaluator) {
-        return new CyclesLifecycleService(client, retryEngine, requestBuilderService, evaluator);
+                                                         CyclesExpressionEvaluator evaluator,
+                                                         CyclesProperties props) {
+        CyclesProperties.Http http = props.getHttp();
+        Duration attemptTimeout = (http.getConnectTimeout() != null && http.getReadTimeout() != null)
+                ? http.getConnectTimeout().plus(http.getReadTimeout())
+                : null;
+        return new CyclesLifecycleService(client, retryEngine, requestBuilderService, evaluator, attemptTimeout);
     }
 
     /**

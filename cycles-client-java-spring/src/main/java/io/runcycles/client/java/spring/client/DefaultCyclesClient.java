@@ -9,6 +9,9 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.lang.reflect.Method;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Map;
 
 /**
@@ -154,7 +157,9 @@ public class DefaultCyclesClient implements CyclesClient {
                         .map(responseBody -> {
                             int status = response.statusCode().value();
                             if (response.statusCode().is2xxSuccessful()) {
-                                return CyclesResponse.success(status, responseBody);
+                                Long dateMs = parseDateMs(
+                                        response.headers().asHttpHeaders().getFirst("Date"));
+                                return CyclesResponse.success(status, responseBody, dateMs);
                             }
                             // Use structured ErrorResponse parsing for consistent error extraction
                             ErrorResponse errorResponse = ErrorResponse.fromMap(responseBody);
@@ -173,27 +178,47 @@ public class DefaultCyclesClient implements CyclesClient {
         ).block();
     }
 
-    // Upper bound on a parsed Retry-After delay (1 hour), guarding against hostile
-    // or mangled headers parking retries for days (and against integer overflow).
-    private static final long MAX_RETRY_AFTER_MS = 3_600_000L;
-
     /**
      * Parses a {@code Retry-After} header value (integer seconds, per spec) into
      * milliseconds. The HTTP-date form is not used by the spec and is ignored, as
-     * are negative values; the result is clamped to one hour.
+     * are negative values. Values that cannot be represented exactly by the
+     * response model are rejected rather than shortened: retrying earlier than
+     * the server requested would violate the throttle.
      */
     private static Integer parseRetryAfterMs(String headerValue) {
         if (headerValue == null) {
             return null;
         }
+        String value = headerValue.trim();
+        if (!value.matches("^[0-9]+$")) {
+            return null;
+        }
         try {
-            long seconds = Long.parseLong(headerValue.trim());
-            if (seconds < 0) {
+            long seconds = Long.parseLong(value);
+            long ms = Math.multiplyExact(seconds, 1000L);
+            if (ms > Integer.MAX_VALUE) {
                 return null;
             }
-            long ms = seconds >= MAX_RETRY_AFTER_MS / 1000 ? MAX_RETRY_AFTER_MS : seconds * 1000L;
             return (int) ms;
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException | ArithmeticException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Parses an RFC 1123 {@code Date} response header into epoch milliseconds.
+     * Absent or malformed values return {@code null} — callers fall back to
+     * behavior that does not depend on the server timestamp.
+     */
+    private static Long parseDateMs(String headerValue) {
+        if (headerValue == null) {
+            return null;
+        }
+        try {
+            return ZonedDateTime.parse(headerValue.trim(), DateTimeFormatter.RFC_1123_DATE_TIME)
+                    .toInstant().toEpochMilli();
+        } catch (DateTimeParseException e) {
+            LOG.debug("Ignoring unparseable Date response header: {}", headerValue);
             return null;
         }
     }
