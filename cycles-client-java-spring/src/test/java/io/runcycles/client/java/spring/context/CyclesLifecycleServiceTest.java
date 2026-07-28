@@ -2195,6 +2195,285 @@ class CyclesLifecycleServiceTest {
                     0L, 7500L, 7500L, 7500L, 7500L, 30000L, 7500L, 7500L);
         }
 
+        // ------------------------------------------------------------------
+        // Server-authoritative remaining_ttl_ms scheduling (spec PR #148)
+        // ------------------------------------------------------------------
+
+        /** Create response carrying the spec PR #148 remaining_ttl_ms field. */
+        private Map<String, Object> allowResponseWithRemaining(String reservationId,
+                                                               long expiresAtMs,
+                                                               long remainingTtlMs) {
+            Map<String, Object> body = allowResponseWithExpiry(reservationId, expiresAtMs);
+            body.put("remaining_ttl_ms", remainingTtlMs);
+            return body;
+        }
+
+        /** Common stubs for ttl=20000 with a remaining_ttl_ms-bearing create response. */
+        private void stubHeartbeatLifecycleWithRemaining(String reservationId,
+                                                         long initialExpiry,
+                                                         long remainingTtlMs) {
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200,
+                            allowResponseWithRemaining(reservationId, initialExpiry, remainingTtlMs)));
+            when(requestBuilderService.buildExtend(eq(20000L), isNull()))
+                    .thenReturn(Map.of("idempotency_key", "ext-template", "extend_by_ms", 20000L));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(anyString(), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+        }
+
+        @Test
+        void shouldScheduleExactlyFromRemainingTtlAndBypassSkip() throws Throwable {
+            // remaining_ttl_ms is NORMATIVE: leadFloor = max(0, 60000 - rtt 0) = 60000,
+            // retryReserve = min(30000, max(1000, 2*0)) = 1000, delay = 59000 — from the
+            // CREATE response (no 0ms prime) and from every extend response. The leadMin
+            // skip check is bypassed even when accumulated grants would trip it.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            AtomicLong serverExpiry = new AtomicLong(initialExpiry);
+            stubHeartbeatLifecycleWithRemaining("res-field", initialExpiry, 60000L);
+            // Huge expiry grants (+1_000_000 per extend) so that by beat 3 the heuristic
+            // bound (leadMin 2_000_000-177_000 >= 1.5*1_000_000) would demand a skip.
+            when(client.extendReservation(eq("res-field"), any(Object.class)))
+                    .thenAnswer(inv -> CyclesResponse.success(200, Map.of(
+                            "status", "ACTIVE",
+                            "expires_at_ms", serverExpiry.addAndGet(1_000_000L),
+                            "remaining_ttl_ms", 60000L)));
+
+            var appender = attachWarnAppender();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            Runnable beat = capturedHeartbeat.get();
+                            advanceClockMs(59000);
+                            beat.run(); // beat 1: extend, delay recomputed to 59000
+                            advanceClockMs(59000);
+                            beat.run(); // beat 2: extend
+                            advanceClockMs(59000);
+                            beat.run(); // beat 3: heuristic would SKIP — field mode extends
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
+
+            verify(client, times(3)).extendReservation(eq("res-field"), any(Object.class));
+            assertThat(scheduledDelays).containsExactly(59000L, 59000L, 59000L, 59000L);
+            assertThat(leadClampWarnCount(appender)).isZero();
+        }
+
+        @Test
+        void shouldScheduleFirstBeatInsideCappedLeaseFromRemainingTtl() throws Throwable {
+            // A tenant-capped create (requested 20000, remaining_ttl_ms 1000) schedules
+            // the FIRST beat at leadFloor - min(leadFloor/2, max(1000, 2*rtt))
+            // = 1000 - min(500, 1000) = 500ms — inside the real 1s lease, with no
+            // wasted 0ms primed extension.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            captureHeartbeat();
+            stubHeartbeatLifecycleWithRemaining("res-field-cap", 1_000_000L, 1000L);
+
+            service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            assertThat(scheduledDelays).containsExactly(500L);
+        }
+
+        @Test
+        void shouldNotCollapseNorWarnUnderMaxLeadClampWithField() throws Throwable {
+            // Max-lead clamp WITH the field: each extend echoes expiry = INITIAL+elapsed
+            // (grant == elapsed, the undecidable heuristic case) but reports
+            // remaining_ttl_ms = 5000 — the server-authoritative cap. Scheduling stays
+            // at 5000 - min(2500, 1000) = 4000ms: no collapse to the floor, no burn,
+            // and NO lead-clamp WARN on the field path.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycleWithRemaining("res-field-lead", initialExpiry, 5000L);
+            when(client.extendReservation(eq("res-field-lead"), any(Object.class)))
+                    .thenAnswer(inv -> CyclesResponse.success(200, Map.of(
+                            "status", "ACTIVE",
+                            "expires_at_ms", initialExpiry + nanoClock.get() / 1_000_000L,
+                            "remaining_ttl_ms", 5000L)));
+
+            var appender = attachWarnAppender();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            Runnable beat = capturedHeartbeat.get();
+                            advanceClockMs(4000);
+                            beat.run(); // beat 1: grant 4000 = elapsed -> field path, no warn
+                            advanceClockMs(4000);
+                            beat.run(); // beat 2: same
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
+
+            verify(client, times(2)).extendReservation(eq("res-field-lead"), any(Object.class));
+            assertThat(scheduledDelays).containsExactly(4000L, 4000L, 4000L);
+            assertThat(leadClampWarnCount(appender)).isZero();
+        }
+
+        @Test
+        void shouldResumeHeuristicWhenFieldDisappears() throws Throwable {
+            // The field is per-response: when an extend response lacks it (downgraded
+            // server, stripping proxy) the maintained grants/leadMin bookkeeping takes
+            // over seamlessly — grant-derived cadence resumes on that very success.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycleWithRemaining("res-field-gone", initialExpiry, 60000L);
+            when(client.extendReservation(eq("res-field-gone"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, Map.of(
+                            "status", "ACTIVE", "expires_at_ms", initialExpiry + 20000L)))
+                    .thenReturn(CyclesResponse.success(200, Map.of(
+                            "status", "ACTIVE", "expires_at_ms", initialExpiry + 40000L)));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable beat = capturedHeartbeat.get();
+                        advanceClockMs(59000);
+                        beat.run(); // beat 1: NO field in response -> heuristic resumes;
+                                    // grant 20000 >= 0.9*20000 -> normal cadence 10000
+                        advanceClockMs(10000);
+                        beat.run(); // beat 2: heuristic mode; leadMin 20000-69000 < 0 -> extend
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            verify(client, times(2)).extendReservation(eq("res-field-gone"), any(Object.class));
+            // field-scheduled first beat, then heuristic grant/2 cadence
+            assertThat(scheduledDelays).containsExactly(59000L, 10000L, 10000L);
+        }
+
+        @Test
+        void shouldRetryFieldModeTransientFailureAtQuarterLeadWithSameKey() throws Throwable {
+            // Transient failure in field mode: retry with the SAME idempotency key after
+            // clamp(currentLeadEstimate/4, 1s, 30s), where currentLeadEstimate is the
+            // last leadFloor minus the time since that response. Also covers the thrown
+            // (transport) variant after re-entering field mode.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycleWithRemaining("res-field-retry", initialExpiry, 60000L);
+            when(client.extendReservation(eq("res-field-retry"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(503, "Unavailable", Map.of()))
+                    .thenReturn(CyclesResponse.success(200, Map.of(
+                            "status", "ACTIVE",
+                            "expires_at_ms", initialExpiry + 20000L,
+                            "remaining_ttl_ms", 60000L)))
+                    .thenThrow(new RuntimeException("connection reset"));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable beat = capturedHeartbeat.get();
+                        advanceClockMs(20000);
+                        beat.run(); // beat 1: 503 -> lead est 60000-20000=40000 -> retry 40000/4=10000
+                        advanceClockMs(10000);
+                        beat.run(); // beat 2: SAME key, succeeds; field -> delay 59000
+                        advanceClockMs(20000);
+                        beat.run(); // beat 3: throws -> lead est 60000-20000=40000 -> retry 10000
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            org.mockito.ArgumentCaptor<Object> bodyCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+            verify(client, times(3)).extendReservation(eq("res-field-retry"), bodyCaptor.capture());
+            String key1 = idempotencyKeyOf(bodyCaptor.getAllValues().get(0));
+            String key2 = idempotencyKeyOf(bodyCaptor.getAllValues().get(1));
+            String key3 = idempotencyKeyOf(bodyCaptor.getAllValues().get(2));
+            assertThat(key2).isEqualTo(key1);        // transient failure replays the key
+            assertThat(key3).isNotEqualTo(key1);     // fresh key after the 2xx
+            assertThat(scheduledDelays).containsExactly(59000L, 10000L, 59000L, 10000L);
+        }
+
+        @Test
+        void shouldSubtractRttAndWidenReserveFromObservedRtt() throws Throwable {
+            // rtt handling: the extend takes 2000ms on the clock, so leadFloor =
+            // 60000 - 2000 = 58000 and maxObservedRtt = 2000 widens the retry reserve
+            // to max(1000, 2*2000) = 4000 -> next delay 54000.
+            useClockedService();
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycleWithRemaining("res-field-rtt", initialExpiry, 60000L);
+            when(client.extendReservation(eq("res-field-rtt"), any(Object.class)))
+                    .thenAnswer(inv -> {
+                        advanceClockMs(2000); // simulated network round-trip
+                        return CyclesResponse.success(200, Map.of(
+                                "status", "ACTIVE",
+                                "expires_at_ms", initialExpiry + 20000L,
+                                "remaining_ttl_ms", 60000L));
+                    });
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable beat = capturedHeartbeat.get();
+                        advanceClockMs(59000);
+                        beat.run();
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            assertThat(scheduledDelays).containsExactly(59000L, 54000L);
+        }
+
         @Test
         void shouldStopPermanentlyOnTenantClosed() throws Throwable {
             // TENANT_CLOSED is a terminal 409 no retry can resolve.
