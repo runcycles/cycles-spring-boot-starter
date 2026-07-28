@@ -1202,6 +1202,17 @@ class CyclesLifecycleServiceTest {
                     client, retryEngine, requestBuilderService, evaluator, heartbeatExecutor, nanoClock::get);
         }
 
+        /**
+         * Same, but with a KNOWN enforced per-attempt HTTP timeout (ms) so field-mode
+         * scheduling has a finite attempt budget:
+         * reserve = 2 x max(timeout, 1000, 2 x maxRtt) + max(1000, 2 x maxRtt).
+         */
+        private void useClockedService(long requestTimeoutMs) {
+            service = new CyclesLifecycleService(
+                    client, retryEngine, requestBuilderService, evaluator, heartbeatExecutor,
+                    nanoClock::get, requestTimeoutMs);
+        }
+
         private void advanceClockMs(long ms) {
             nanoClock.addAndGet(ms * 1_000_000L);
         }
@@ -2017,12 +2028,18 @@ class CyclesLifecycleServiceTest {
                     .detachAppender(appender);
         }
 
-        private long leadClampWarnCount(
-                ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender) {
+        private long warnCount(
+                ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender,
+                String messageFragment) {
             return appender.list.stream()
                     .filter(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN)
-                    .filter(e -> e.getFormattedMessage().contains("lead-clamped"))
+                    .filter(e -> e.getFormattedMessage().contains(messageFragment))
                     .count();
+        }
+
+        private long leadClampWarnCount(
+                ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender) {
+            return warnCount(appender, "lead-clamped");
         }
 
         @Test
@@ -2196,7 +2213,10 @@ class CyclesLifecycleServiceTest {
         }
 
         // ------------------------------------------------------------------
-        // Server-authoritative remaining_ttl_ms scheduling (spec PR #148)
+        // Server-authoritative remaining_ttl_ms scheduling (spec PR #148,
+        // HEARTBEAT GUIDANCE at head dd60c27). Unless stated otherwise the tests
+        // use a known 5000ms per-attempt timeout, rtt 0: attemptBudget = 5000,
+        // safetyMargin = 1000, retryReserve = 2x5000+1000 = 11000.
         // ------------------------------------------------------------------
 
         /** Create response carrying the spec PR #148 remaining_ttl_ms field. */
@@ -2229,10 +2249,11 @@ class CyclesLifecycleServiceTest {
         @Test
         void shouldScheduleExactlyFromRemainingTtlAndBypassSkip() throws Throwable {
             // remaining_ttl_ms is NORMATIVE: leadFloor = max(0, 60000 - rtt 0) = 60000,
-            // retryReserve = min(30000, max(1000, 2*0)) = 1000, delay = 59000 — from the
-            // CREATE response (no 0ms prime) and from every extend response. The leadMin
-            // skip check is bypassed even when accumulated grants would trip it.
-            useClockedService();
+            // retryReserve = 2 x max(5000, 1000, 0) + max(1000, 0) = 11000, delay =
+            // 49000 — from the CREATE response (no 0ms prime) and from every
+            // schema-valid extend response. The leadMin skip check is bypassed even
+            // when accumulated grants would trip it.
+            useClockedService(5000L);
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
             Method method = dummyMethod();
@@ -2244,7 +2265,7 @@ class CyclesLifecycleServiceTest {
             AtomicLong serverExpiry = new AtomicLong(initialExpiry);
             stubHeartbeatLifecycleWithRemaining("res-field", initialExpiry, 60000L);
             // Huge expiry grants (+1_000_000 per extend) so that by beat 3 the heuristic
-            // bound (leadMin 2_000_000-177_000 >= 1.5*1_000_000) would demand a skip.
+            // bound (leadMin 2_000_000-147_000 >= 1.5*1_000_000) would demand a skip.
             when(client.extendReservation(eq("res-field"), any(Object.class)))
                     .thenAnswer(inv -> CyclesResponse.success(200, Map.of(
                             "status", "ACTIVE",
@@ -2256,11 +2277,11 @@ class CyclesLifecycleServiceTest {
                 service.executeWithReservation(
                         () -> {
                             Runnable beat = capturedHeartbeat.get();
-                            advanceClockMs(59000);
-                            beat.run(); // beat 1: extend, delay recomputed to 59000
-                            advanceClockMs(59000);
+                            advanceClockMs(49000);
+                            beat.run(); // beat 1: extend, delay recomputed to 49000
+                            advanceClockMs(49000);
                             beat.run(); // beat 2: extend
-                            advanceClockMs(59000);
+                            advanceClockMs(49000);
                             beat.run(); // beat 3: heuristic would SKIP — field mode extends
                             return "ok";
                         },
@@ -2272,43 +2293,109 @@ class CyclesLifecycleServiceTest {
             }
 
             verify(client, times(3)).extendReservation(eq("res-field"), any(Object.class));
-            assertThat(scheduledDelays).containsExactly(59000L, 59000L, 59000L, 59000L);
+            assertThat(scheduledDelays).containsExactly(49000L, 49000L, 49000L, 49000L);
             assertThat(leadClampWarnCount(appender)).isZero();
         }
 
         @Test
-        void shouldScheduleFirstBeatInsideCappedLeaseFromRemainingTtl() throws Throwable {
-            // A tenant-capped create (requested 20000, remaining_ttl_ms 1000) schedules
-            // the FIRST beat at leadFloor - min(leadFloor/2, max(1000, 2*rtt))
-            // = 1000 - min(500, 1000) = 500ms — inside the real 1s lease, with no
-            // wasted 0ms primed extension.
-            useClockedService();
+        void shouldStopAfterTwoConsecutiveZeroDelaySchedules() throws Throwable {
+            // ZERO-DELAY GUARD trace. A capped create (remaining_ttl_ms 1000 <=
+            // retryReserve 11000) yields firstDelay 0 — that IS the one permitted
+            // immediate fresh attempt. When its schema-valid success also computes
+            // nextDelay 0 (lease still 1000), the client MUST stop and surface that
+            // the lease is shorter than the retry-safety budget — never loop.
+            useClockedService(5000L);
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
             Method method = dummyMethod();
             Object[] args = {100};
             Object target = CyclesLifecycleServiceTest.this;
 
-            captureHeartbeat();
-            stubHeartbeatLifecycleWithRemaining("res-field-cap", 1_000_000L, 1000L);
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycleWithRemaining("res-zerodelay", initialExpiry, 1000L);
+            when(client.extendReservation(eq("res-zerodelay"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, Map.of(
+                            "status", "ACTIVE",
+                            "expires_at_ms", initialExpiry + 1000L,
+                            "remaining_ttl_ms", 1000L)));
 
-            service.executeWithReservation(
-                    () -> "ok",
-                    cycles, method, args, target,
-                    "llm", "complete"
-            );
+            var appender = attachWarnAppender();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            Runnable beat = capturedHeartbeat.get();
+                            beat.run(); // immediate beat: success, nextDelay 0 again -> STOP
+                            beat.run(); // stopped -> no further HTTP call
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
 
-            assertThat(scheduledDelays).containsExactly(500L);
+            verify(client, times(1)).extendReservation(eq("res-zerodelay"), any(Object.class));
+            // only the immediate first schedule ever happened — a stopped beat never reschedules
+            assertThat(scheduledDelays).containsExactly(0L);
+            verify(heartbeatFuture, atLeastOnce()).cancel(false);
+            assertThat(warnCount(appender, "retry-safety budget")).isEqualTo(1);
+        }
+
+        @Test
+        void shouldStopAfterOneImmediateAttemptWhenTimeoutUnknown() throws Throwable {
+            // Unknown/unbounded per-attempt timeout -> attemptBudget = +infinity ->
+            // every field-mode delay is 0. The guard permits the one immediate fresh
+            // extension and then stops; the client MUST NOT downgrade to the fieldless
+            // fallback merely because it cannot bound its own attempts.
+            useClockedService(); // no timeout wired
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycleWithRemaining("res-notiming", initialExpiry, 60000L);
+            when(client.extendReservation(eq("res-notiming"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, Map.of(
+                            "status", "ACTIVE",
+                            "expires_at_ms", initialExpiry + 20000L,
+                            "remaining_ttl_ms", 60000L)));
+
+            var appender = attachWarnAppender();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            Runnable beat = capturedHeartbeat.get();
+                            beat.run(); // immediate attempt: success but delay 0 again -> STOP
+                            advanceClockMs(10000);
+                            beat.run(); // stopped -> no fallback takeover, no HTTP call
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
+
+            verify(client, times(1)).extendReservation(eq("res-notiming"), any(Object.class));
+            assertThat(scheduledDelays).containsExactly(0L);
+            verify(heartbeatFuture, atLeastOnce()).cancel(false);
+            assertThat(warnCount(appender, "retry-safety budget")).isEqualTo(1);
         }
 
         @Test
         void shouldNotCollapseNorWarnUnderMaxLeadClampWithField() throws Throwable {
             // Max-lead clamp WITH the field: each extend echoes expiry = INITIAL+elapsed
             // (grant == elapsed, the undecidable heuristic case) but reports
-            // remaining_ttl_ms = 5000 — the server-authoritative cap. Scheduling stays
-            // at 5000 - min(2500, 1000) = 4000ms: no collapse to the floor, no burn,
-            // and NO lead-clamp WARN on the field path.
-            useClockedService();
+            // remaining_ttl_ms = 5000 — server-authoritative. With a 1000ms timeout,
+            // retryReserve = 2x1000+1000 = 3000, so the cadence stays at 5000-3000 =
+            // 2000ms: no collapse to the floor, no burn, and NO lead-clamp WARN.
+            useClockedService(1000L);
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
             Method method = dummyMethod();
@@ -2329,9 +2416,9 @@ class CyclesLifecycleServiceTest {
                 service.executeWithReservation(
                         () -> {
                             Runnable beat = capturedHeartbeat.get();
-                            advanceClockMs(4000);
-                            beat.run(); // beat 1: grant 4000 = elapsed -> field path, no warn
-                            advanceClockMs(4000);
+                            advanceClockMs(2000);
+                            beat.run(); // beat 1: grant 2000 = elapsed -> field path, no warn
+                            advanceClockMs(2000);
                             beat.run(); // beat 2: same
                             return "ok";
                         },
@@ -2343,16 +2430,17 @@ class CyclesLifecycleServiceTest {
             }
 
             verify(client, times(2)).extendReservation(eq("res-field-lead"), any(Object.class));
-            assertThat(scheduledDelays).containsExactly(4000L, 4000L, 4000L);
+            assertThat(scheduledDelays).containsExactly(2000L, 2000L, 2000L);
             assertThat(leadClampWarnCount(appender)).isZero();
         }
 
         @Test
         void shouldResumeHeuristicWhenFieldDisappears() throws Throwable {
-            // The field is per-response: when an extend response lacks it (downgraded
-            // server, stripping proxy) the maintained grants/leadMin bookkeeping takes
-            // over seamlessly — grant-derived cadence resumes on that very success.
-            useClockedService();
+            // The field is per-response: when a schema-valid extend response lacks it
+            // (downgraded server, stripping proxy) the maintained grants/leadMin
+            // bookkeeping takes over seamlessly — grant-derived cadence resumes on
+            // that very success.
+            useClockedService(5000L);
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
             Method method = dummyMethod();
@@ -2371,11 +2459,11 @@ class CyclesLifecycleServiceTest {
             service.executeWithReservation(
                     () -> {
                         Runnable beat = capturedHeartbeat.get();
-                        advanceClockMs(59000);
+                        advanceClockMs(49000);
                         beat.run(); // beat 1: NO field in response -> heuristic resumes;
                                     // grant 20000 >= 0.9*20000 -> normal cadence 10000
                         advanceClockMs(10000);
-                        beat.run(); // beat 2: heuristic mode; leadMin 20000-69000 < 0 -> extend
+                        beat.run(); // beat 2: heuristic mode; leadMin 20000-59000 < 0 -> extend
                         return "ok";
                     },
                     cycles, method, args, target,
@@ -2384,16 +2472,70 @@ class CyclesLifecycleServiceTest {
 
             verify(client, times(2)).extendReservation(eq("res-field-gone"), any(Object.class));
             // field-scheduled first beat, then heuristic grant/2 cadence
-            assertThat(scheduledDelays).containsExactly(59000L, 10000L, 10000L);
+            assertThat(scheduledDelays).containsExactly(49000L, 10000L, 10000L);
         }
 
         @Test
-        void shouldRetryFieldModeTransientFailureAtQuarterLeadWithSameKey() throws Throwable {
-            // Transient failure in field mode: retry with the SAME idempotency key after
-            // clamp(currentLeadEstimate/4, 1s, 30s), where currentLeadEstimate is the
-            // last leadFloor minus the time since that response. Also covers the thrown
-            // (transport) variant after re-entering field mode.
-            useClockedService();
+        void shouldTreatAmbiguous2xxAsTransientWithSameKeyRecovery() throws Throwable {
+            // SUCCESS PREDICATE: only a schema-valid HTTP 200 ReservationExtendResponse
+            // (status ACTIVE + expires_at_ms) counts. A 200 missing expires_at_ms is
+            // AMBIGUOUS -> same-key recovery at min(30s, lead/4, window), never
+            // "applied": at elapsed 20000, lead = 40000, window = 40000-5000-1000 =
+            // 34000, delay = min(30000, 10000, 34000) = 10000.
+            useClockedService(5000L);
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycleWithRemaining("res-ambiguous", initialExpiry, 60000L);
+            when(client.extendReservation(eq("res-ambiguous"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, Map.of("status", "ACTIVE"))) // no expires_at_ms
+                    .thenReturn(CyclesResponse.success(200, Map.of(
+                            "status", "ACTIVE",
+                            "expires_at_ms", initialExpiry + 20000L,
+                            "remaining_ttl_ms", 60000L)));
+
+            var appender = attachWarnAppender();
+            AtomicReference<CyclesReservationContext> capturedCtx = new AtomicReference<>();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            capturedCtx.set(CyclesContextHolder.get());
+                            Runnable beat = capturedHeartbeat.get();
+                            advanceClockMs(20000);
+                            beat.run(); // beat 1: ambiguous 2xx -> key kept, delay 10000
+                            advanceClockMs(10000);
+                            beat.run(); // beat 2: SAME key, schema-valid success -> 49000
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
+
+            org.mockito.ArgumentCaptor<Object> bodyCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+            verify(client, times(2)).extendReservation(eq("res-ambiguous"), bodyCaptor.capture());
+            assertThat(idempotencyKeyOf(bodyCaptor.getAllValues().get(1)))
+                    .isEqualTo(idempotencyKeyOf(bodyCaptor.getAllValues().get(0)));
+            assertThat(scheduledDelays).containsExactly(49000L, 10000L, 49000L);
+            assertThat(warnCount(appender, "ambiguous")).isEqualTo(1);
+            // the ambiguous response never updated the context expiry
+            assertThat(capturedCtx.get().getExpiresAtMs()).isEqualTo(initialExpiry + 20000L);
+        }
+
+        @Test
+        void shouldRetryFieldModeTransientFailureWithinWindowWithSameKey() throws Throwable {
+            // Transient failure in field mode: retry the SAME idempotency key after
+            // min(30s, currentLeadEstimate/4, retryWindow), recomputed from the last
+            // schema-valid response. Also covers the thrown (transport) variant after
+            // re-entering field mode.
+            useClockedService(5000L);
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
             Method method = dummyMethod();
@@ -2415,11 +2557,11 @@ class CyclesLifecycleServiceTest {
                     () -> {
                         Runnable beat = capturedHeartbeat.get();
                         advanceClockMs(20000);
-                        beat.run(); // beat 1: 503 -> lead est 60000-20000=40000 -> retry 40000/4=10000
+                        beat.run(); // beat 1: 503 -> lead 40000, window 34000 -> delay 10000
                         advanceClockMs(10000);
-                        beat.run(); // beat 2: SAME key, succeeds; field -> delay 59000
+                        beat.run(); // beat 2: SAME key, succeeds; field -> delay 49000
                         advanceClockMs(20000);
-                        beat.run(); // beat 3: throws -> lead est 60000-20000=40000 -> retry 10000
+                        beat.run(); // beat 3: throws -> lead 40000 -> delay 10000
                         return "ok";
                     },
                     cycles, method, args, target,
@@ -2432,16 +2574,283 @@ class CyclesLifecycleServiceTest {
             String key2 = idempotencyKeyOf(bodyCaptor.getAllValues().get(1));
             String key3 = idempotencyKeyOf(bodyCaptor.getAllValues().get(2));
             assertThat(key2).isEqualTo(key1);        // transient failure replays the key
-            assertThat(key3).isNotEqualTo(key1);     // fresh key after the 2xx
-            assertThat(scheduledDelays).containsExactly(59000L, 10000L, 59000L, 10000L);
+            assertThat(key3).isNotEqualTo(key1);     // fresh key after the success
+            assertThat(scheduledDelays).containsExactly(49000L, 10000L, 49000L, 10000L);
+        }
+
+        @Test
+        void shouldRepeatRecoveryUntilWindowNegativeThenStop() throws Throwable {
+            // Repeated recovery: lead and window are recomputed from the SAME last
+            // schema-valid response (the create) after EVERY failed attempt; retries
+            // continue with the same key while window >= 0 and stop the moment
+            // window < 0 (no complete attempt plus margin provably fits).
+            //   create: remaining 20000 -> leadFloor 20000 -> firstDelay 9000
+            //   fail 1 (t= 9000): lead 11000, window  5000 -> delay min(30000,2750,5000) = 2750
+            //   fail 2 (t=11750): lead  8250, window  2250 -> delay min(30000,2062,2250) = 2062
+            //   fail 3 (t=13812): lead  6188, window   188 -> delay 188
+            //   fail 4 (t=15000, timer late): lead 5000, window -1000 -> STOP
+            useClockedService(5000L);
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycleWithRemaining("res-recovery", initialExpiry, 20000L);
+            when(client.extendReservation(eq("res-recovery"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(503, "Unavailable", Map.of()));
+
+            var appender = attachWarnAppender();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            Runnable beat = capturedHeartbeat.get();
+                            advanceClockMs(9000);
+                            beat.run();  // fail 1
+                            advanceClockMs(2750);
+                            beat.run();  // fail 2
+                            advanceClockMs(2062);
+                            beat.run();  // fail 3
+                            advanceClockMs(1188);
+                            beat.run();  // fail 4: window < 0 -> stop
+                            advanceClockMs(1000);
+                            beat.run();  // stopped -> no HTTP call
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
+
+            org.mockito.ArgumentCaptor<Object> bodyCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+            verify(client, times(4)).extendReservation(eq("res-recovery"), bodyCaptor.capture());
+            // the key never rotates across the whole recovery sequence
+            String key1 = idempotencyKeyOf(bodyCaptor.getAllValues().get(0));
+            assertThat(bodyCaptor.getAllValues().stream().map(this::idempotencyKeyOf))
+                    .containsOnly(key1);
+            assertThat(scheduledDelays).containsExactly(9000L, 2750L, 2062L, 188L);
+            verify(heartbeatFuture, atLeastOnce()).cancel(false);
+            assertThat(warnCount(appender, "no complete extend retry")).isEqualTo(1);
+        }
+
+        @Test
+        void shouldAllowOneImmediateRetryAtZeroWindowThenStop() throws Throwable {
+            // window == 0 permits exactly one immediate recovery retry; if it also
+            // fails before an intervening success the beat stops — the progress guard
+            // forbids a zero-time recovery loop even when coarse clocks report zero.
+            //   create: remaining 12000 -> leadFloor 12000 -> firstDelay 1000
+            //   fail 1 (t=6000): lead 6000, window 6000-5000-1000 = 0 -> immediate retry
+            //   fail 2 (t=6000): elapsed and window unchanged -> STOP
+            useClockedService(5000L);
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycleWithRemaining("res-zerowindow", initialExpiry, 12000L);
+            when(client.extendReservation(eq("res-zerowindow"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(503, "Unavailable", Map.of()));
+
+            var appender = attachWarnAppender();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            Runnable beat = capturedHeartbeat.get();
+                            advanceClockMs(6000);
+                            beat.run(); // fail 1: window 0 -> one immediate retry
+                            beat.run(); // fail 2: no progress -> stop
+                            beat.run(); // stopped -> no HTTP call
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
+
+            verify(client, times(2)).extendReservation(eq("res-zerowindow"), any(Object.class));
+            assertThat(scheduledDelays).containsExactly(1000L, 0L);
+            verify(heartbeatFuture, atLeastOnce()).cancel(false);
+            assertThat(warnCount(appender, "no progress")).isEqualTo(1);
+        }
+
+        @Test
+        void shouldHonor429RetryAfterWithinWindow() throws Throwable {
+            // 429 in field mode: Retry-After (delta-seconds x 1000) is honored at
+            // exactly that delay when it fits the retry window, with the SAME key.
+            useClockedService(5000L);
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            long initialExpiry = 1_000_000L;
+            stubHeartbeatLifecycleWithRemaining("res-429ok", initialExpiry, 60000L);
+            when(client.extendReservation(eq("res-429ok"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(429, "Too many requests",
+                            Map.of("error", "LIMIT_EXCEEDED", "message", "Too many", "request_id", "r1"),
+                            2000))
+                    .thenReturn(CyclesResponse.success(200, Map.of(
+                            "status", "ACTIVE",
+                            "expires_at_ms", initialExpiry + 20000L,
+                            "remaining_ttl_ms", 60000L)));
+
+            service.executeWithReservation(
+                    () -> {
+                        Runnable beat = capturedHeartbeat.get();
+                        advanceClockMs(9000);
+                        beat.run(); // 429: lead 51000, window 45000, Retry-After 2000 fits
+                        advanceClockMs(2000);
+                        beat.run(); // SAME key, succeeds -> 49000
+                        return "ok";
+                    },
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            org.mockito.ArgumentCaptor<Object> bodyCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+            verify(client, times(2)).extendReservation(eq("res-429ok"), bodyCaptor.capture());
+            assertThat(idempotencyKeyOf(bodyCaptor.getAllValues().get(1)))
+                    .isEqualTo(idempotencyKeyOf(bodyCaptor.getAllValues().get(0)));
+            assertThat(scheduledDelays).containsExactly(49000L, 2000L, 49000L);
+        }
+
+        @Test
+        void shouldStopWhen429RetryAfterExceedsWindow() throws Throwable {
+            // A Retry-After beyond the safe retry window means the lease cannot be
+            // renewed without violating throttling: never invent an earlier retry —
+            // stop and surface. At elapsed 20000: lead 40000, window 34000 < 40000.
+            useClockedService(5000L);
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            stubHeartbeatLifecycleWithRemaining("res-429far", 1_000_000L, 60000L);
+            when(client.extendReservation(eq("res-429far"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(429, "Too many requests",
+                            Map.of("error", "LIMIT_EXCEEDED", "message", "Too many", "request_id", "r1"),
+                            40000));
+
+            var appender = attachWarnAppender();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            Runnable beat = capturedHeartbeat.get();
+                            advanceClockMs(20000);
+                            beat.run(); // 429 Retry-After 40000 > window 34000 -> stop
+                            beat.run(); // stopped -> no HTTP call
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
+
+            verify(client, times(1)).extendReservation(eq("res-429far"), any(Object.class));
+            assertThat(scheduledDelays).containsExactly(49000L);
+            verify(heartbeatFuture, atLeastOnce()).cancel(false);
+            assertThat(warnCount(appender, "Retry-After")).isEqualTo(1);
+        }
+
+        @Test
+        void shouldStopWhen429RetryAfterMissing() throws Throwable {
+            // A 429 without a usable Retry-After gives no throttling-safe retry
+            // instant: stop and surface rather than invent one.
+            useClockedService(5000L);
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            stubHeartbeatLifecycleWithRemaining("res-429bare", 1_000_000L, 60000L);
+            when(client.extendReservation(eq("res-429bare"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(429, "Too many requests", Map.of()));
+
+            var appender = attachWarnAppender();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            Runnable beat = capturedHeartbeat.get();
+                            advanceClockMs(9000);
+                            beat.run(); // 429, no Retry-After -> stop
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
+
+            verify(client, times(1)).extendReservation(eq("res-429bare"), any(Object.class));
+            verify(heartbeatFuture, atLeastOnce()).cancel(false);
+            assertThat(warnCount(appender, "Retry-After")).isEqualTo(1);
+        }
+
+        @Test
+        void shouldStopOnNonRetryable4xxInFieldMode() throws Throwable {
+            // Any other 4xx is a request/authorization failure: stop and surface,
+            // never rotate the idempotency key and retry an unchanged request.
+            useClockedService(5000L);
+            Cycles cycles = mockCycles(false);
+            when(cycles.ttlMs()).thenReturn(20000L);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            AtomicReference<Runnable> capturedHeartbeat = captureHeartbeat();
+            stubHeartbeatLifecycleWithRemaining("res-400", 1_000_000L, 60000L);
+            when(client.extendReservation(eq("res-400"), any(Object.class)))
+                    .thenReturn(CyclesResponse.httpError(400, "Bad request",
+                            Map.of("error", "INVALID_REQUEST", "message", "Bad request", "request_id", "r1")));
+
+            var appender = attachWarnAppender();
+            try {
+                service.executeWithReservation(
+                        () -> {
+                            Runnable beat = capturedHeartbeat.get();
+                            advanceClockMs(9000);
+                            beat.run(); // 400 -> stop, no retry
+                            beat.run(); // stopped -> no HTTP call
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
+            } finally {
+                detachAppender(appender);
+            }
+
+            verify(client, times(1)).extendReservation(eq("res-400"), any(Object.class));
+            assertThat(scheduledDelays).containsExactly(49000L);
+            verify(heartbeatFuture, atLeastOnce()).cancel(false);
+            assertThat(warnCount(appender, "not retrying an unchanged request")).isEqualTo(1);
         }
 
         @Test
         void shouldSubtractRttAndWidenReserveFromObservedRtt() throws Throwable {
             // rtt handling: the extend takes 2000ms on the clock, so leadFloor =
-            // 60000 - 2000 = 58000 and maxObservedRtt = 2000 widens the retry reserve
-            // to max(1000, 2*2000) = 4000 -> next delay 54000.
-            useClockedService();
+            // 60000 - 2000 = 58000 and maxObservedRtt = 2000 widens both budget terms:
+            // attemptBudget = max(5000, 1000, 4000) = 5000, safetyMargin = max(1000,
+            // 4000) = 4000, reserve = 14000 -> next delay 44000.
+            useClockedService(5000L);
             Cycles cycles = mockCycles(false);
             when(cycles.ttlMs()).thenReturn(20000L);
             Method method = dummyMethod();
@@ -2463,7 +2872,7 @@ class CyclesLifecycleServiceTest {
             service.executeWithReservation(
                     () -> {
                         Runnable beat = capturedHeartbeat.get();
-                        advanceClockMs(59000);
+                        advanceClockMs(49000);
                         beat.run();
                         return "ok";
                     },
@@ -2471,7 +2880,7 @@ class CyclesLifecycleServiceTest {
                     "llm", "complete"
             );
 
-            assertThat(scheduledDelays).containsExactly(59000L, 54000L);
+            assertThat(scheduledDelays).containsExactly(49000L, 44000L);
         }
 
         @Test

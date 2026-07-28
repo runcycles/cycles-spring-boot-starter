@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,9 +35,19 @@ public class CyclesLifecycleService {
     private final CyclesRequestBuilderService requestBuilderService;
     private final ScheduledExecutorService heartbeatExecutor;
     private final LongSupplier nanoClock;
+    /**
+     * The client's ENFORCED finite upper bound for one complete extend attempt
+     * (connect, write, read, failure detection) in ms, or {@code null} when
+     * unknown/unbounded. Feeds attempt_budget in the remaining_ttl_ms heartbeat
+     * schedule (HEARTBEAT GUIDANCE, cycles-protocol-v0.yaml); unknown makes
+     * attempt_budget infinite, which forces next_delay to 0 per spec.
+     */
+    private final Long requestTimeoutBudgetMs;
 
     /**
-     * Creates a new lifecycle service with the given dependencies.
+     * Creates a new lifecycle service with the given dependencies and an
+     * unknown per-attempt HTTP timeout (heartbeat field-mode scheduling then
+     * conservatively treats the attempt budget as unbounded).
      *
      * @param client                the Cycles API client
      * @param retryEngine           the commit retry engine
@@ -47,13 +58,34 @@ public class CyclesLifecycleService {
                                   CommitRetryEngine retryEngine,
                                   CyclesRequestBuilderService requestBuilderService,
                                   CyclesExpressionEvaluator evaluator) {
+        this(client, retryEngine, requestBuilderService, evaluator, (Duration) null);
+    }
+
+    /**
+     * Creates a new lifecycle service with the given dependencies and the
+     * client's enforced per-attempt HTTP timeout.
+     *
+     * @param client                the Cycles API client
+     * @param retryEngine           the commit retry engine
+     * @param requestBuilderService the request builder service
+     * @param evaluator             the SpEL expression evaluator
+     * @param requestTimeoutBudget  the enforced upper bound for one complete
+     *                              HTTP attempt (connect + read), or {@code null}
+     *                              when unknown/unbounded
+     */
+    public CyclesLifecycleService(CyclesClient client,
+                                  CommitRetryEngine retryEngine,
+                                  CyclesRequestBuilderService requestBuilderService,
+                                  CyclesExpressionEvaluator evaluator,
+                                  Duration requestTimeoutBudget) {
         this(client, retryEngine, requestBuilderService, evaluator,
                 Executors.newSingleThreadScheduledExecutor(r -> {
                     Thread t = new Thread(r);
                     t.setDaemon(true);
                     t.setName("cycles-heartbeat");
                     return t;
-                }));
+                }), System::nanoTime,
+                requestTimeoutBudget != null ? requestTimeoutBudget.toMillis() : null);
     }
 
     // Visible for testing
@@ -62,7 +94,7 @@ public class CyclesLifecycleService {
                            CyclesRequestBuilderService requestBuilderService,
                            CyclesExpressionEvaluator evaluator,
                            ScheduledExecutorService heartbeatExecutor) {
-        this(client, retryEngine, requestBuilderService, evaluator, heartbeatExecutor, System::nanoTime);
+        this(client, retryEngine, requestBuilderService, evaluator, heartbeatExecutor, System::nanoTime, null);
     }
 
     // Visible for testing — injectable monotonic clock for deterministic heartbeat tests
@@ -72,12 +104,24 @@ public class CyclesLifecycleService {
                            CyclesExpressionEvaluator evaluator,
                            ScheduledExecutorService heartbeatExecutor,
                            LongSupplier nanoClock) {
+        this(client, retryEngine, requestBuilderService, evaluator, heartbeatExecutor, nanoClock, null);
+    }
+
+    // Visible for testing — injectable clock and enforced per-attempt timeout (ms)
+    CyclesLifecycleService(CyclesClient client,
+                           CommitRetryEngine retryEngine,
+                           CyclesRequestBuilderService requestBuilderService,
+                           CyclesExpressionEvaluator evaluator,
+                           ScheduledExecutorService heartbeatExecutor,
+                           LongSupplier nanoClock,
+                           Long requestTimeoutBudgetMs) {
         this.client = client;
         this.retryEngine = retryEngine;
         this.requestBuilderService = requestBuilderService;
         this.evaluator = evaluator;
         this.heartbeatExecutor = heartbeatExecutor;
         this.nanoClock = nanoClock;
+        this.requestTimeoutBudgetMs = requestTimeoutBudgetMs;
     }
 
     /**
@@ -113,9 +157,10 @@ public class CyclesLifecycleService {
         long resT1 = System.currentTimeMillis();
         // Round-trip of the create call on the injected monotonic clock — feeds the
         // remaining_ttl_ms lead-floor computation when the server emits the field.
+        // Rounded UP so rounding cannot consume the reserved margin.
         long createSentNanos = nanoClock.getAsLong();
         CyclesResponse<Map<String, Object>> reservationResponse = client.createReservation(createBody);
-        long createRttMs = (nanoClock.getAsLong() - createSentNanos) / 1_000_000L;
+        long createRttMs = ceilToMs(nanoClock.getAsLong() - createSentNanos);
 
         if (!reservationResponse.is2xx()) {
             LOG.error("Reservation failed, aborting: reservationResponse={}", reservationResponse);
@@ -386,24 +431,46 @@ public class CyclesLifecycleService {
         if (expiresAtMs == null || requestedTtlMs <= 0) {
             return null;
         }
-        // NORMATIVE SCHEDULING (remaining_ttl_ms, spec PR #148). When a successful
-        // create/extend response carries remaining_ttl_ms — the remaining reservation
-        // lifetime at response evaluation, same clock snapshot as expires_at_ms — the
-        // server is authoritative and the heartbeat schedules EXACTLY from it:
+        // NORMATIVE SCHEDULING (remaining_ttl_ms — HEARTBEAT GUIDANCE in
+        // cycles-protocol-v0.yaml, spec PR #148 head dd60c27). Only a SCHEMA-VALID
+        // HTTP 200 ReservationExtendResponse (status=ACTIVE + expires_at_ms), or the
+        // initial ReservationCreateResponse, counts as an observed success in this
+        // mode; any other or malformed 2xx is AMBIGUOUS and is treated as a transient
+        // failure with same-key recovery — never as applied. On every such success
+        // carrying remaining_ttl_ms, the schedule is recomputed from that response
+        // alone (never from accumulated expiry differences):
         //
-        //   leadFloor    = max(0, remaining_ttl_ms - rtt)        (rtt of that call)
-        //   retryReserve = min(leadFloor/2, max(1000, 2 x maxObservedRtt))
-        //   nextDelay    = max(0, leadFloor - retryReserve)
+        //   rtt           = per-attempt monotonic round-trip (rounded UP; max tracked)
+        //   leadFloor     = max(0, remaining_ttl_ms - rtt)               (rounded DOWN)
+        //   attemptBudget = max(requestTimeoutBudget, 1000, 2 x maxObservedRtt)
+        //                   (unknown/unbounded timeout -> positive infinity)
+        //   safetyMargin  = max(1000, 2 x maxObservedRtt)
+        //   retryReserve  = 2 x attemptBudget + safetyMargin
+        //   nextDelay     = max(0, leadFloor - retryReserve)
         //
-        // recomputed from EVERY successful response carrying the field and scheduled
-        // from response receipt. Expiry differences are never accumulated in this
-        // mode, and the leadMin skip check is BYPASSED — scheduling is exact, so a
-        // heuristic skip could overshoot the real lease. The grants/leadMin
-        // bookkeeping keeps running underneath so the fallback heuristic takes over
-        // the moment a response lacks the field (older server, or a proxy stripping
-        // it). A transient failure in this mode retries with the SAME idempotency
-        // key after clamp(currentLeadEstimate/4, 1s, 30s), where currentLeadEstimate
-        // = last leadFloor minus the time since that response (floored at 0).
+        // scheduled from response receipt, overflow-safe ms arithmetic throughout
+        // (positive overflow saturates, never wraps). The leadMin skip check is
+        // BYPASSED — scheduling is exact, so a heuristic skip could overshoot the
+        // real lease. ZERO-DELAY GUARD: a schema-valid success producing nextDelay 0
+        // permits ONE immediate fresh attempt (new idempotency key); if that success
+        // also yields 0, the heartbeat stops and surfaces that the lease is shorter
+        // than the retry-safety budget. Unknown timing/timeout MUST NOT be treated as
+        // zero elapsed and MUST NOT downgrade the client to the fieldless fallback.
+        //
+        // RECOVERY (timeout/connection/5xx/429/ambiguous-2xx): from the SAME last
+        // schema-valid response, currentLeadEstimate = max(0, lastLeadFloor -
+        // elapsedSinceThatResponse) and retryWindow = currentLeadEstimate -
+        // attemptBudget - safetyMargin, UNclamped. window < 0 -> no complete retry
+        // plus margin is provably safe: stop and surface. Otherwise non-429 retries
+        // the SAME key after min(30s, currentLeadEstimate/4, retryWindow); 429 uses
+        // Retry-After (delta-seconds x 1000, overflow-safe) only when it fits the
+        // window, else stops. Recovery may repeat: lead/window are recomputed after
+        // EVERY failed attempt; window == 0 permits one immediate retry then stops,
+        // and a progress guard stops the loop when neither elapsed nor window moves
+        // between consecutive failures. Any other 4xx stops and surfaces without
+        // key rotation. The grants/leadMin bookkeeping keeps running underneath so
+        // the fallback heuristic takes over the moment a response lacks the field
+        // (older server, or a proxy stripping it).
         //
         // Everything below is the best-effort FALLBACK for servers that do not emit
         // remaining_ttl_ms. Regime detection from (grant, elapsed) alone is formally
@@ -488,33 +555,159 @@ public class CyclesLifecycleService {
         AtomicReference<ScheduledFuture<?>> selfRef = new AtomicReference<>();
         AtomicBoolean stopped = new AtomicBoolean(false);
         // Server-authoritative lead floor (field mode): >= 0 while the LATEST
-        // successful response carried remaining_ttl_ms, -1 in heuristic mode.
+        // schema-valid success carried remaining_ttl_ms, -1 in heuristic mode.
         AtomicLong lastLeadFloorMs = new AtomicLong(-1L);
         AtomicLong leadFloorAtNanos = new AtomicLong(anchorNanos);
         AtomicLong maxRttMs = new AtomicLong(Math.max(createRttMs, 0L));
-        // Retry delay after a transient failure/exception in field mode:
-        // clamp(currentLeadEstimate/4, 1s, 30s).
-        LongSupplier fieldRetryDelayMs = () -> {
-            long sinceMs = (nanoClock.getAsLong() - leadFloorAtNanos.get()) / 1_000_000L;
-            long leadEstimateMs = Math.max(0L, lastLeadFloorMs.get() - sinceMs);
-            return Math.max(1000L, Math.min(leadEstimateMs / 4, 30_000L));
-        };
+        // Zero-delay guard: true while the latest schema-valid success (or the
+        // create) produced next_delay 0 — a second consecutive zero stops the beat.
+        AtomicBoolean zeroDelayStreak = new AtomicBoolean(false);
+        // Recovery progress state, reset on every schema-valid success.
+        AtomicBoolean zeroWindowRetried = new AtomicBoolean(false);
+        AtomicLong lastRecoveryElapsed = new AtomicLong(Long.MIN_VALUE);
+        AtomicLong lastRecoveryWindow = new AtomicLong(Long.MIN_VALUE);
         long firstDelayMs = 0L;
         if (createRemainingTtlMs != null) {
             long leadFloor = Math.max(0L, createRemainingTtlMs - Math.max(createRttMs, 0L));
             lastLeadFloorMs.set(leadFloor);
             firstDelayMs = nextFieldDelayMs(leadFloor, maxRttMs.get());
+            // A zero first delay is itself the one permitted immediate attempt.
+            zeroDelayStreak.set(firstDelayMs == 0L);
         }
         LOG.debug("Scheduling heartbeat: reservationId={}, requestedTtlMs={}, "
                 + "createRemainingTtlMs={}, firstDelayMs={}",
                 reservationId, requestedTtlMs, createRemainingTtlMs, firstDelayMs);
         Runnable beat = new Runnable() {
+
+            /** Stops the heartbeat for good and surfaces the reason at WARN. */
+            private void stopAndSurface(String reason) {
+                stopped.set(true);
+                LOG.warn("Heartbeat stopped ({}): reservationId={}", reason, reservationId);
+                ScheduledFuture<?> self = selfRef.get();
+                if (self != null) {
+                    self.cancel(false);
+                }
+            }
+
+            /**
+             * Applies the field-mode schedule from a fresh schema-valid lead floor,
+             * including the zero-delay guard, and resets recovery progress state.
+             */
+            private void applyFieldSchedule(long leadFloorMs, long receivedNanos) {
+                lastLeadFloorMs.set(leadFloorMs);
+                leadFloorAtNanos.set(receivedNanos);
+                zeroWindowRetried.set(false);
+                lastRecoveryElapsed.set(Long.MIN_VALUE);
+                lastRecoveryWindow.set(Long.MIN_VALUE);
+                long nextDelay = nextFieldDelayMs(leadFloorMs, maxRttMs.get());
+                if (nextDelay == 0L) {
+                    if (zeroDelayStreak.getAndSet(true)) {
+                        // Two consecutive zero-delay schedules: an unbounded
+                        // zero-delay loop is forbidden.
+                        stopAndSurface("lease is shorter than the retry-safety budget "
+                                + "(consecutive zero-delay schedules)");
+                    } else {
+                        // ONE immediate fresh attempt with a NEW idempotency key
+                        // (pendingKey was cleared by the success that got us here).
+                        delayMs.set(0L);
+                    }
+                } else {
+                    zeroDelayStreak.set(false);
+                    delayMs.set(nextDelay);
+                }
+            }
+
+            /** Fallback (fieldless) cadence from the observed grant — v2.3+band. */
+            private void applyFallbackDelay(long appliedGrant, long elapsedSinceSuccessMs) {
+                // Lead-clamp regime detection (LEAD-CLAMP REGIME above):
+                // grant-derived cadence is only valid for real per-extend
+                // grants, never for elapsed-time echoes of a clamped lead.
+                // Both band bounds matter — a post-skip real grant can equal
+                // elapsed once, but only a clamped lead TRACKS elapsed.
+                boolean leadClamped = appliedGrant <= 0
+                        || (appliedGrant < requestedTtlMs * 9 / 10
+                            && appliedGrant >= elapsedSinceSuccessMs * 3 / 4
+                            && appliedGrant <= elapsedSinceSuccessMs + elapsedSinceSuccessMs / 4);
+                if (leadClamped) {
+                    delayMs.set(heldCadenceMs);
+                    if (leadClampWarned.compareAndSet(false, true)) {
+                        LOG.warn("Heartbeat extends are not gaining lease (grantMs={} vs "
+                                + "elapsedMs={} — expiry appears lead-clamped, likely budget "
+                                + "depletion); holding cadence at {}ms: reservationId={}",
+                                appliedGrant, elapsedSinceSuccessMs, heldCadenceMs, reservationId);
+                    }
+                } else {
+                    delayMs.set(Math.max(500L, Math.min(appliedGrant / 2, requestedTtlMs / 2)));
+                }
+            }
+
+            /**
+             * Field-mode recovery after a timeout, connection error, 5xx, 429, or
+             * ambiguous 2xx. Recomputes the lead estimate and retry window from the
+             * last schema-valid response on EVERY failure; retries the SAME key only
+             * while a complete attempt plus margin provably fits.
+             */
+            private void fieldRecovery(Integer retryAfterMs, boolean rateLimited) {
+                long elapsedSinceLeadMs = ceilToMs(nanoClock.getAsLong() - leadFloorAtNanos.get());
+                long currentLeadMs = Math.max(0L, lastLeadFloorMs.get() - elapsedSinceLeadMs);
+                long retryWindow = retryWindowMs(currentLeadMs, maxRttMs.get());
+                long prevElapsed = lastRecoveryElapsed.getAndSet(elapsedSinceLeadMs);
+                long prevWindow = lastRecoveryWindow.getAndSet(retryWindow);
+                if (prevElapsed != Long.MIN_VALUE
+                        && elapsedSinceLeadMs <= prevElapsed && retryWindow >= prevWindow) {
+                    // Progress guard: a zero-time recovery loop is forbidden.
+                    stopAndSurface("no progress between consecutive extend recovery attempts");
+                } else if (retryWindow < 0L) {
+                    stopAndSurface("no complete extend retry plus safety margin fits the remaining "
+                            + "lease (retryWindowMs=" + retryWindow + ")");
+                } else if (rateLimited) {
+                    if (retryAfterMs == null || retryAfterMs > retryWindow) {
+                        // Never invent an earlier retry that violates throttling.
+                        stopAndSurface("429 Retry-After is missing, invalid, or exceeds the safe "
+                                + "retry window (retryAfterMs=" + retryAfterMs
+                                + ", retryWindowMs=" + retryWindow + ")");
+                    } else {
+                        delayMs.set(retryAfterMs.longValue());
+                    }
+                } else if (retryWindow == 0L) {
+                    if (zeroWindowRetried.getAndSet(true)) {
+                        stopAndSurface("retry window still zero after an immediate recovery retry");
+                    } else {
+                        delayMs.set(0L);
+                    }
+                } else {
+                    delayMs.set(Math.min(30_000L, Math.min(currentLeadMs / 4, retryWindow)));
+                }
+            }
+
+            /** Permanent, irreversible failures stop the heartbeat in both modes. */
+            private boolean handledPermanently(CyclesResponse<Map<String, Object>> extendResponse) {
+                ErrorCode errorCode = extractErrorCode(extendResponse);
+                if (extendResponse.getStatus() == 410
+                        || errorCode == ErrorCode.RESERVATION_EXPIRED
+                        || errorCode == ErrorCode.RESERVATION_FINALIZED
+                        || errorCode == ErrorCode.MAX_EXTENSIONS_EXCEEDED
+                        || errorCode == ErrorCode.TENANT_CLOSED
+                        || errorCode == ErrorCode.NOT_FOUND) {
+                    stopped.set(true);
+                    LOG.warn("Heartbeat extend failed permanently, stopping heartbeat: "
+                            + "reservationId={}, status={}, errorCode={}",
+                            reservationId, extendResponse.getStatus(), errorCode);
+                    ScheduledFuture<?> self = selfRef.get();
+                    if (self != null) {
+                        self.cancel(false);
+                    }
+                    return true;
+                }
+                return false;
+            }
+
             @Override
             public void run() {
                 if (stopped.get()) {
                     return;
                 }
-                long elapsedMs = (nanoClock.getAsLong() - anchorNanos) / 1_000_000L;
+                long elapsedMs = ceilToMs(nanoClock.getAsLong() - anchorNanos);
                 long leadMinMs = grantsSum.get() - elapsedMs;
                 Long grant = lastGrant.get();
                 // Field mode bypasses the heuristic skip: scheduling from
@@ -526,7 +719,7 @@ public class CyclesLifecycleService {
                 } else {
                     try {
                         // Reuse the pending idempotency key after a failure so a lost response
-                        // replays instead of double-extending; regenerate only after a 2xx.
+                        // replays instead of double-extending; regenerate only after a success.
                         String key = pendingKey.get();
                         if (key == null) {
                             key = UUID.randomUUID().toString();
@@ -543,11 +736,65 @@ public class CyclesLifecycleService {
                         CyclesResponse<Map<String, Object>> extendResponse =
                                 client.extendReservation(reservationId, extendBody);
                         long receivedNanos = nanoClock.getAsLong();
-                        long rttMs = (receivedNanos - sentNanos) / 1_000_000L;
+                        // Per-attempt rtt, rounded UP so rounding cannot consume margin.
+                        long rttMs = ceilToMs(receivedNanos - sentNanos);
                         maxRttMs.accumulateAndGet(rttMs, Math::max);
-                        if (extendResponse.is2xx()) {
+                        ExtendResult extResult = extendResponse.is2xx()
+                                ? ExtendResult.fromMap(extendResponse.getBody()) : null;
+                        // SUCCESS PREDICATE (field mode): only a schema-valid HTTP 200
+                        // ReservationExtendResponse counts — status ACTIVE + expires_at_ms.
+                        boolean schemaValid = extendResponse.getStatus() == 200
+                                && extResult != null
+                                && extResult.getStatus() == ExtendStatus.ACTIVE
+                                && extResult.getExpiresAtMs() != null;
+                        if (fieldMode) {
+                            if (schemaValid) {
+                                pendingKey.set(null);
+                                long newExpiresAtMs = extResult.getExpiresAtMs();
+                                long appliedGrant = newExpiresAtMs - prevExpiry.getAndSet(newExpiresAtMs);
+                                long nowNanos = nanoClock.getAsLong();
+                                long elapsedSinceSuccessMs =
+                                        ceilToMs(nowNanos - lastSuccessNanos.getAndSet(nowNanos));
+                                // Grants/leadMin bookkeeping runs in BOTH modes so the
+                                // fallback can take over if the field disappears.
+                                long creditedGrant = Math.max(appliedGrant, 0L);
+                                grantsSum.addAndGet(creditedGrant);
+                                lastGrant.set(creditedGrant);
+                                ctx.updateExpiresAtMs(newExpiresAtMs);
+                                Long remainingTtlMs = extResult.getRemainingTtlMs();
+                                if (remainingTtlMs != null) {
+                                    applyFieldSchedule(Math.max(0L, remainingTtlMs - rttMs), receivedNanos);
+                                } else {
+                                    // Field disappeared -> the fallback heuristic takes over.
+                                    lastLeadFloorMs.set(-1L);
+                                    zeroDelayStreak.set(false);
+                                    applyFallbackDelay(appliedGrant, elapsedSinceSuccessMs);
+                                }
+                                LOG.debug("Heartbeat extend successful (field mode): reservationId={}, "
+                                        + "newExpiresAtMs={}, remainingTtlMs={}, nextDelayMs={}",
+                                        reservationId, newExpiresAtMs, remainingTtlMs, delayMs.get());
+                            } else if (!extendResponse.is2xx() && handledPermanently(extendResponse)) {
+                                // stopped inside handledPermanently
+                            } else if (!extendResponse.is2xx() && extendResponse.is4xx()
+                                    && extendResponse.getStatus() != 429) {
+                                // Any other 4xx: request/authorization failure — never
+                                // rotate the key and retry an unchanged request.
+                                stopAndSurface("extend rejected with status "
+                                        + extendResponse.getStatus() + "; not retrying an unchanged request");
+                            } else {
+                                // Transient: timeout/connection/5xx/429/ambiguous 2xx.
+                                boolean rateLimited = extendResponse.getStatus() == 429;
+                                if (extendResponse.is2xx()) {
+                                    LOG.warn("Heartbeat extend returned an ambiguous 2xx (not a schema-valid "
+                                            + "200 ReservationExtendResponse); treating as a transient failure: "
+                                            + "reservationId={}, status={}",
+                                            reservationId, extendResponse.getStatus());
+                                }
+                                fieldRecovery(rateLimited ? extendResponse.getRetryAfterMs() : null, rateLimited);
+                            }
+                        } else if (extendResponse.is2xx()) {
+                            // Fallback path keeps its 2xx-as-applied behavior.
                             pendingKey.set(null);
-                            ExtendResult extResult = ExtendResult.fromMap(extendResponse.getBody());
                             if (extResult == null || extResult.getStatus() != ExtendStatus.ACTIVE) {
                                 LOG.warn("Heartbeat extend returned 2xx with unexpected status, treating as applied: "
                                         + "reservationId={}, status={}", reservationId,
@@ -565,82 +812,36 @@ public class CyclesLifecycleService {
                             prevExpiry.set(resolvedExpiry);
                             long nowNanos = nanoClock.getAsLong();
                             long elapsedSinceSuccessMs =
-                                    (nowNanos - lastSuccessNanos.getAndSet(nowNanos)) / 1_000_000L;
+                                    ceilToMs(nowNanos - lastSuccessNanos.getAndSet(nowNanos));
                             Long remainingTtlMs = extResult != null ? extResult.getRemainingTtlMs() : null;
-                            boolean leadClamped = false;
-                            if (remainingTtlMs != null) {
-                                // Server-authoritative scheduling (NORMATIVE above):
-                                // exact lead floor, no regime heuristic, no clamp WARN.
-                                long leadFloor = Math.max(0L, remainingTtlMs - rttMs);
-                                lastLeadFloorMs.set(leadFloor);
-                                leadFloorAtNanos.set(receivedNanos);
-                                delayMs.set(nextFieldDelayMs(leadFloor, maxRttMs.get()));
+                            if (schemaValid && remainingTtlMs != null) {
+                                // A schema-valid 200 carrying the field (re)enters field mode.
+                                applyFieldSchedule(Math.max(0L, remainingTtlMs - rttMs), receivedNanos);
                             } else {
-                                // Field absent -> the fallback heuristic (re)takes over.
-                                lastLeadFloorMs.set(-1L);
-                                // Lead-clamp regime detection (LEAD-CLAMP REGIME above):
-                                // grant-derived cadence is only valid for real per-extend
-                                // grants, never for elapsed-time echoes of a clamped lead.
-                                // Both band bounds matter — a post-skip real grant can equal
-                                // elapsed once, but only a clamped lead TRACKS elapsed.
-                                leadClamped = appliedGrant <= 0
-                                        || (appliedGrant < requestedTtlMs * 9 / 10
-                                            && appliedGrant >= elapsedSinceSuccessMs * 3 / 4
-                                            && appliedGrant <= elapsedSinceSuccessMs + elapsedSinceSuccessMs / 4);
-                                if (leadClamped) {
-                                    delayMs.set(heldCadenceMs);
-                                    if (leadClampWarned.compareAndSet(false, true)) {
-                                        LOG.warn("Heartbeat extends are not gaining lease (grantMs={} vs "
-                                                + "elapsedMs={} — expiry appears lead-clamped, likely budget "
-                                                + "depletion); holding cadence at {}ms: reservationId={}",
-                                                appliedGrant, elapsedSinceSuccessMs, heldCadenceMs, reservationId);
-                                    }
-                                } else {
-                                    delayMs.set(Math.max(500L, Math.min(appliedGrant / 2, requestedTtlMs / 2)));
-                                }
+                                applyFallbackDelay(appliedGrant, elapsedSinceSuccessMs);
                             }
-                            // Grants/leadMin bookkeeping runs in BOTH modes so the
-                            // heuristic can take over if the field disappears.
                             long creditedGrant = Math.max(appliedGrant, 0L);
                             grantsSum.addAndGet(creditedGrant);
                             lastGrant.set(creditedGrant);
                             ctx.updateExpiresAtMs(resolvedExpiry);
                             LOG.debug("Heartbeat extend successful: reservationId={}, newExpiresAtMs={}, "
-                                    + "grantMs={}, remainingTtlMs={}, leadClamped={}, nextDelayMs={}",
-                                    reservationId, resolvedExpiry, appliedGrant, remainingTtlMs,
-                                    leadClamped, delayMs.get());
-                        } else {
-                            ErrorCode errorCode = extractErrorCode(extendResponse);
-                            if (extendResponse.getStatus() == 410
-                                    || errorCode == ErrorCode.RESERVATION_EXPIRED
-                                    || errorCode == ErrorCode.RESERVATION_FINALIZED
-                                    || errorCode == ErrorCode.MAX_EXTENSIONS_EXCEEDED
-                                    || errorCode == ErrorCode.TENANT_CLOSED
-                                    || errorCode == ErrorCode.NOT_FOUND) {
-                                stopped.set(true);
-                                LOG.warn("Heartbeat extend failed permanently, stopping heartbeat: "
-                                        + "reservationId={}, status={}, errorCode={}",
-                                        reservationId, extendResponse.getStatus(), errorCode);
-                                ScheduledFuture<?> self = selfRef.get();
-                                if (self != null) {
-                                    self.cancel(false);
-                                }
-                            } else {
-                                if (fieldMode) {
-                                    delayMs.set(fieldRetryDelayMs.getAsLong());
-                                }
-                                LOG.warn("Heartbeat extend failed, will retry next beat with the same "
-                                        + "idempotency key: reservationId={}, status={}, error={}, nextDelayMs={}",
-                                        reservationId, extendResponse.getStatus(),
-                                        extendResponse.getErrorMessage(), delayMs.get());
-                            }
+                                    + "grantMs={}, remainingTtlMs={}, nextDelayMs={}",
+                                    reservationId, resolvedExpiry, appliedGrant, remainingTtlMs, delayMs.get());
+                        } else if (!handledPermanently(extendResponse)) {
+                            LOG.warn("Heartbeat extend failed, will retry next beat with the same "
+                                    + "idempotency key: reservationId={}, status={}, error={}, nextDelayMs={}",
+                                    reservationId, extendResponse.getStatus(),
+                                    extendResponse.getErrorMessage(), delayMs.get());
                         }
                     } catch (Exception e) {
                         if (fieldMode) {
-                            delayMs.set(fieldRetryDelayMs.getAsLong());
+                            LOG.warn("Heartbeat extend error in field mode, applying recovery: reservationId={}",
+                                    reservationId, e);
+                            fieldRecovery(null, false);
+                        } else {
+                            LOG.warn("Heartbeat extend error, will retry next beat with the same idempotency key: "
+                                    + "reservationId={}", reservationId, e);
                         }
-                        LOG.warn("Heartbeat extend error, will retry next beat with the same idempotency key: "
-                                + "reservationId={}", reservationId, e);
                     }
                 }
                 if (!stopped.get()) {
@@ -658,14 +859,69 @@ public class CyclesLifecycleService {
         };
     }
 
+    // -------------------------
+    // remaining_ttl_ms schedule arithmetic (overflow-safe milliseconds; positive
+    // overflow saturates to +infinity, never wraps — per HEARTBEAT GUIDANCE)
+    // -------------------------
+
+    /** Nanos to ms rounded UP (rtts and elapsed feeding budgets/lead bounds round up). */
+    private static long ceilToMs(long nanos) {
+        return nanos <= 0L ? 0L : (nanos - 1L) / 1_000_000L + 1L;
+    }
+
+    private static long satAdd(long a, long b) {
+        try {
+            return Math.addExact(a, b);
+        } catch (ArithmeticException e) {
+            return Long.MAX_VALUE;
+        }
+    }
+
+    private static long satMul(long a, long b) {
+        try {
+            return Math.multiplyExact(a, b);
+        } catch (ArithmeticException e) {
+            return Long.MAX_VALUE;
+        }
+    }
+
     /**
-     * Next one-shot delay in the server-authoritative {@code remaining_ttl_ms} mode:
-     * beat {@code retryReserve = min(leadFloor/2, max(1s, 2 x maxObservedRtt))}
-     * before the lease floor runs out, leaving room for one in-flight retry.
+     * {@code attempt_budget = max(request_timeout_budget, 1s, 2 x maxObservedRtt)}.
+     * An unknown/unbounded per-attempt timeout makes the budget positive infinity,
+     * which forces every field-mode delay to 0 (the spec's conservative posture:
+     * unknown timing is never treated as zero elapsed time).
      */
-    private static long nextFieldDelayMs(long leadFloorMs, long maxRttMs) {
-        long retryReserve = Math.min(leadFloorMs / 2, Math.max(1000L, 2 * maxRttMs));
-        return Math.max(0L, leadFloorMs - retryReserve);
+    private long attemptBudgetMs(long maxRttMs) {
+        long timeout = requestTimeoutBudgetMs != null ? requestTimeoutBudgetMs : Long.MAX_VALUE;
+        return Math.max(Math.max(timeout, 1000L), satMul(2L, maxRttMs));
+    }
+
+    /** {@code safety_margin = max(1s, 2 x maxObservedRtt)}. */
+    private static long safetyMarginMs(long maxRttMs) {
+        return Math.max(1000L, satMul(2L, maxRttMs));
+    }
+
+    /**
+     * {@code next_delay = max(0, lead_floor - (2 x attempt_budget + safety_margin))} —
+     * the reserve covers one failed attempt, one same-key retry, and margin.
+     */
+    private long nextFieldDelayMs(long leadFloorMs, long maxRttMs) {
+        long retryReserve = satAdd(satMul(2L, attemptBudgetMs(maxRttMs)), safetyMarginMs(maxRttMs));
+        return leadFloorMs > retryReserve ? leadFloorMs - retryReserve : 0L;
+    }
+
+    /**
+     * {@code retry_window = current_lead_estimate - attempt_budget - safety_margin},
+     * deliberately UNclamped — a negative window proves no complete retry plus
+     * margin fits and the caller must stop.
+     */
+    private long retryWindowMs(long currentLeadMs, long maxRttMs) {
+        try {
+            return Math.subtractExact(Math.subtractExact(currentLeadMs, attemptBudgetMs(maxRttMs)),
+                    safetyMarginMs(maxRttMs));
+        } catch (ArithmeticException e) {
+            return Long.MIN_VALUE;
+        }
     }
 
     private void cancelHeartbeat(Runnable heartbeatCanceller) {
