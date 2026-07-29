@@ -268,7 +268,10 @@ class ModelSerializationTest {
             Map<String, Object> raw = Map.of(
                     "status", "COMMITTED",
                     "charged", Map.of("unit", "TOKENS", "amount", 800),
-                    "released", Map.of("unit", "TOKENS", "amount", 200)
+                    "released", Map.of("unit", "TOKENS", "amount", 200),
+                    "cycles_evidence", Map.of(
+                            "evidence_id", "a".repeat(64),
+                            "cycles_evidence_url", "https://cycles.example/v1/evidence/id")
             );
 
             CommitResult result = CommitResult.fromMap(raw);
@@ -276,6 +279,7 @@ class ModelSerializationTest {
             assertThat(result.getStatus()).isEqualTo(CommitStatus.COMMITTED);
             assertThat(result.getCharged().getAmount()).isEqualTo(800L);
             assertThat(result.getReleased().getAmount()).isEqualTo(200L);
+            assertThat(result.getCyclesEvidence().getEvidenceId()).isEqualTo("a".repeat(64));
         }
     }
 

@@ -13,12 +13,15 @@ public class CommitResult {
     private final Amount charged;
     private final Amount released;
     private final List<Balance> balances;
+    private final CyclesEvidenceRef cyclesEvidence;
 
-    private CommitResult(CommitStatus status, Amount charged, Amount released, List<Balance> balances) {
+    private CommitResult(CommitStatus status, Amount charged, Amount released,
+                         List<Balance> balances, CyclesEvidenceRef cyclesEvidence) {
         this.status = status;
         this.charged = charged;
         this.released = released;
         this.balances = balances;
+        this.cyclesEvidence = cyclesEvidence;
     }
 
     /**
@@ -34,7 +37,10 @@ public class CommitResult {
                 CommitStatus.fromString(map.get("status") instanceof String s ? s : null),
                 map.get("charged") instanceof Map<?, ?> m ? Amount.fromMap((Map<String, Object>) m) : null,
                 map.get("released") instanceof Map<?, ?> m ? Amount.fromMap((Map<String, Object>) m) : null,
-                Balance.listFromRaw(map.get("balances") instanceof List<?> l ? l : null)
+                Balance.listFromRaw(map.get("balances") instanceof List<?> l ? l : null),
+                CyclesEvidenceRef.fromMap(
+                        map.get("cycles_evidence") instanceof Map<?, ?> m
+                                ? (Map<String, Object>) m : null)
         );
     }
 
@@ -62,6 +68,12 @@ public class CommitResult {
      * @return The updated balances after the commit
      */
     public List<Balance> getBalances() { return balances; }
+    /**
+     * Returns the signed evidence reference emitted for this commit.
+     *
+     * @return the evidence reference, or {@code null} when evidence emission is disabled
+     */
+    public CyclesEvidenceRef getCyclesEvidence() { return cyclesEvidence; }
 
     @Override
     public String toString() {

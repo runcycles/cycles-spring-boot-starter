@@ -324,12 +324,12 @@ class CyclesLifecycleServiceCoverageTest {
             when(client.commitReservation(eq("res-unk"), any(Object.class)))
                     .thenReturn(CyclesResponse.httpError(301, "Redirect", Map.of()));
 
-            // Should not throw, just log warning
+            // Should not throw; retain the same-key recovery work for replay.
             service.executeWithReservation(
                     () -> "ok", cycles, method, new Object[]{100}, this, "llm", "complete");
 
             verify(client, never()).releaseReservation(anyString(), any(Object.class));
-            verify(retryEngine, never()).schedule(anyString(), any(), any(), any());
+            verify(retryEngine).schedule(eq("res-unk"), any(), any(), isNull());
             verify(retryEngine, never()).scheduleEvent(anyString(), any());
         }
     }

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.lang.reflect.Method;
 import java.math.BigInteger;
@@ -164,8 +165,37 @@ class CyclesLifecycleServiceTest {
 
             assertThat(result).isEqualTo("hello");
             verify(client).createReservation(any(Object.class));
-            verify(client).commitReservation(eq("res-1"), any(Object.class));
+            InOrder settlementOrder = inOrder(retryEngine, client);
+            settlementOrder.verify(retryEngine).persistPending(
+                    eq("res-1"), any(), any());
+            settlementOrder.verify(client).commitReservation(
+                    eq("res-1"), any(Object.class));
+            settlementOrder.verify(retryEngine).discardPending("res-1");
             verify(client, never()).releaseReservation(anyString(), any(Object.class));
+        }
+
+        @Test
+        void shouldTreatProtocolInvalidCommit2xxAsAmbiguous() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(
+                    any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-ambiguous")));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(eq("res-ambiguous"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, Map.of("status", "COMMITTED")));
+
+            service.executeWithReservation(
+                    () -> "ok", cycles, method, args, this, "llm", "complete");
+
+            verify(retryEngine).persistPending(eq("res-ambiguous"), any(), any());
+            verify(retryEngine).schedule(eq("res-ambiguous"), any(), any(), isNull());
+            verify(retryEngine, never()).discardPending("res-ambiguous");
         }
 
         @Test
@@ -3403,9 +3433,9 @@ class CyclesLifecycleServiceTest {
             );
             assertThat(result).isEqualTo("ok");
 
-            // Should not release or retry for unrecognized status
+            // Ambiguous status retains the spend and retries with the same key.
             verify(client, never()).releaseReservation(anyString(), any(Object.class));
-            verify(retryEngine, never()).schedule(anyString(), any(), any(), any());
+            verify(retryEngine).schedule(eq("res-weird"), any(), any(), isNull());
             verify(retryEngine, never()).scheduleEvent(anyString(), any());
         }
     }

@@ -7,6 +7,7 @@ import io.runcycles.client.java.spring.journal.PendingCommitRecord;
 import io.runcycles.client.java.spring.model.CyclesResponse;
 import io.runcycles.client.java.spring.model.ErrorCode;
 import io.runcycles.client.java.spring.model.ErrorResponse;
+import io.runcycles.client.java.spring.model.SettlementResponseValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.DisposableBean;
@@ -162,6 +163,18 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
         submit(new Pending(reservationId, null, eventBody, PendingCommitRecord.MODE_EVENT));
     }
 
+    @Override
+    public void persistPending(String reservationId, Map<String, Object> commitBody,
+                               Map<String, Object> eventFallbackBody) {
+        journalRecord(new Pending(reservationId, commitBody, eventFallbackBody,
+                PendingCommitRecord.MODE_COMMIT));
+    }
+
+    @Override
+    public void discardPending(String reservationId) {
+        journalDiscard(reservationId);
+    }
+
     /**
      * Waits (bounded by one overall deadline) for in-flight retries to finish, then
      * stops accepting new work. Called automatically on Spring context shutdown.
@@ -286,7 +299,7 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
      * fallback immediately (no extra backoff).
      */
     private boolean classifyCommitResponse(Pending pending, CyclesResponse<Map<String, Object>> response) {
-        if (response.is2xx()) {
+        if (SettlementResponseValidator.isCommitSuccess(response)) {
             LOG.info("Commit retry succeeded: reservationId={}, attempt={}",
                     pending.reservationId, pending.attempt);
             journalDiscard(pending.reservationId);
@@ -318,7 +331,7 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
                         + "(journal entry retained): reservationId={}", pending.reservationId);
                 return true;
             }
-            if (code == null || code == ErrorCode.UNKNOWN) {
+            if (code == null || code.isRetryable()) {
                 // Codeless or unrecognized 4xx: this client version cannot prove it is
                 // a genuine rejection, so keep the spend record for a later replay.
                 LOG.error("Commit retry got 4xx without a recognized error code (status={}); journal "
@@ -338,7 +351,7 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
 
     /** Handles an event-fallback attempt's response. Returns {@code true} when terminal. */
     private boolean classifyEventResponse(Pending pending, CyclesResponse<Map<String, Object>> response) {
-        if (response.is2xx()) {
+        if (SettlementResponseValidator.isEventSuccess(response)) {
             LOG.info("Recovered expired-commit spend via /v1/events: reservationId={}, eventId={}",
                     pending.reservationId, response.getBodyAttributeAsString("event_id"));
             journalDiscard(pending.reservationId);
@@ -355,7 +368,7 @@ public class JournaledCommitRetryEngine implements CommitRetryEngine, Disposable
         }
         if (response.is4xx()) {
             ErrorCode code = extractErrorCode(response);
-            if (code == null || code == ErrorCode.UNKNOWN) {
+            if (code == null || code.isRetryable()) {
                 // Codeless or unrecognized 4xx: cannot prove a genuine rejection, so
                 // keep the spend record for a later replay.
                 LOG.error("Event fallback got 4xx without a recognized error code (status={}); journal "

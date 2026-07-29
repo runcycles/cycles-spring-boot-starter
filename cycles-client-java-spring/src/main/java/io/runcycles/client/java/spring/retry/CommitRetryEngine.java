@@ -47,6 +47,21 @@ public interface CommitRetryEngine {
     void scheduleEvent(String reservationId, Map<String, Object> eventBody);
 
     /**
+     * Persists known actual spend before the first settlement request.
+     */
+    default void persistPending(String reservationId, Map<String, Object> commitBody,
+                                Map<String, Object> eventFallbackBody) {
+        // Optional for non-durable custom engines.
+    }
+
+    /**
+     * Removes a pre-journaled settlement after a terminal outcome.
+     */
+    default void discardPending(String reservationId) {
+        // Optional for non-durable custom engines.
+    }
+
+    /**
      * Waits (bounded by one overall deadline) for in-flight retries to finish.
      * Anything still pending when the timeout elapses stays journaled and replays
      * on the next run.

@@ -121,7 +121,8 @@ class CommitJournalTest {
         void shouldWriteCrossSdkSnakeCaseKeys() throws IOException {
             journal().record(commitRecord("res-keys", BASE_URL, 123L));
 
-            String raw = Files.readString(dir.resolve("res-keys.json"));
+            String raw = Files.readString(
+                    dir.resolve(CommitJournal.safeName("res-keys") + ".json"));
             Map<String, Object> data = MAPPER.readValue(raw, new TypeReference<Map<String, Object>>() {});
             assertThat(data.keySet()).containsExactly(
                     "version", "reservation_id", "base_url", "mode",
@@ -150,14 +151,35 @@ class CommitJournalTest {
         }
 
         @Test
-        void shouldSanitizeUnsafeReservationIdsInFileNames() {
+        void shouldUseCrossSdkDigestNamesForExactUtf8ReservationIds() {
             journal().record(commitRecord("res/1:2..x", BASE_URL, null));
 
-            assertThat(Files.exists(dir.resolve("res_1_2__x.json"))).isTrue();
+            Path standard = dir.resolve(CommitJournal.safeName("res/1:2..x") + ".json");
+            assertThat(Files.exists(standard)).isTrue();
+            assertThat(CommitJournal.safeName("r🚀"))
+                    .isEqualTo("v2-34c5b33347a139e63c81ea72943cc15dd4c2087dc1eaa756a78f3c49974e0b87");
             assertThat(journal().loadPending(BASE_URL)).hasSize(1);
 
             journal().discard("res/1:2..x");
-            assertThat(Files.exists(dir.resolve("res_1_2__x.json"))).isFalse();
+            assertThat(Files.exists(standard)).isFalse();
+        }
+
+        @Test
+        void shouldKeepCollidingLegacyIdsDistinctAndMigrateSafely() throws IOException {
+            journal().record(commitRecord("rsv/a", BASE_URL, null));
+            journal().record(commitRecord("rsv_a", BASE_URL, null));
+            assertThat(CommitJournal.safeName("rsv/a"))
+                    .isNotEqualTo(CommitJournal.safeName("rsv_a"));
+
+            Path legacy = dir.resolve("rsv_a.json");
+            Files.writeString(legacy, commitRecord("rsv/a", BASE_URL, null).toJson());
+            journal().discard("rsv_a");
+            assertThat(legacy).exists();
+            List<PendingCommitRecord> loaded = journal().loadPending(BASE_URL);
+            assertThat(legacy).doesNotExist();
+            assertThat(dir.resolve(CommitJournal.safeName("rsv/a") + ".json")).exists();
+            assertThat(loaded).extracting(PendingCommitRecord::getReservationId)
+                    .containsExactly("rsv/a");
         }
 
         @Test
@@ -250,7 +272,7 @@ class CommitJournalTest {
             // plain IOException (not AtomicMoveNotSupportedException), which must
             // propagate to record()'s failure handling — temp cleanup, no throw —
             // rather than being retried non-atomically.
-            Path blockedTarget = dir.resolve("res-blk.json");
+            Path blockedTarget = dir.resolve(CommitJournal.safeName("res-blk") + ".json");
             Files.createDirectory(blockedTarget);
             Files.writeString(blockedTarget.resolve("child"), "occupied");
 

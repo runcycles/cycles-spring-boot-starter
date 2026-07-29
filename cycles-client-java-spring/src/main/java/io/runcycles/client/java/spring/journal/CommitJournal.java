@@ -14,6 +14,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -166,6 +168,18 @@ public class CommitJournal {
     public void discard(String reservationId) {
         try {
             Files.deleteIfExists(directory.resolve(safeName(reservationId) + SUFFIX));
+            Path legacy = directory.resolve(legacySafeName(reservationId) + SUFFIX);
+            if (Files.exists(legacy)) {
+                try {
+                    PendingCommitRecord entry = PendingCommitRecord.fromJson(
+                            Files.readString(legacy, StandardCharsets.UTF_8));
+                    if (reservationId.equals(entry.getReservationId())) {
+                        Files.deleteIfExists(legacy);
+                    }
+                } catch (Exception ignored) {
+                    // Never delete a colliding or malformed legacy record.
+                }
+            }
         } catch (Exception e) {
             LOG.warn("Failed to discard journal entry: id={}", reservationId, e);
         }
@@ -203,6 +217,28 @@ public class CommitJournal {
                     quarantine(path);
                     continue;
                 }
+                Path standardPath = directory.resolve(safeName(entry.getReservationId()) + SUFFIX);
+                boolean duplicateOfStandard = false;
+                if (!path.equals(standardPath)) {
+                    try {
+                        if (!Files.exists(standardPath)) {
+                            atomicMove(path, standardPath);
+                        } else {
+                            PendingCommitRecord existing = PendingCommitRecord.fromJson(
+                                    Files.readString(standardPath, StandardCharsets.UTF_8));
+                            if (entry.getReservationId().equals(existing.getReservationId())) {
+                                Files.deleteIfExists(path);
+                                duplicateOfStandard = true;
+                            }
+                        }
+                    } catch (Exception e) {
+                        LOG.warn("Could not safely migrate legacy journal filename: id={}, path={}",
+                                entry.getReservationId(), path, e);
+                    }
+                }
+                if (duplicateOfStandard) {
+                    continue;
+                }
                 if (entry.getBaseUrl() != null && entry.getBaseUrl().equals(baseUrl)) {
                     entries.add(entry);
                 }
@@ -214,13 +250,23 @@ public class CommitJournal {
     }
 
     /**
-     * Sanitizes a reservation id into a safe file name: any character outside
-     * {@code [A-Za-z0-9_-]} is replaced with {@code '_'}.
+     * Computes the standard collision-resistant filename stem from the exact UTF-8
+     * reservation identifier.
      *
      * @param reservationId the reservation id
      * @return the sanitized file-name stem
      */
     static String safeName(String reservationId) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(reservationId.getBytes(StandardCharsets.UTF_8));
+            return "v2-" + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    private static String legacySafeName(String reservationId) {
         return reservationId.replaceAll("[^A-Za-z0-9_-]", "_");
     }
 
