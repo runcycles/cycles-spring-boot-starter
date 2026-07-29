@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -125,6 +126,7 @@ class JournaledCommitRetryEngineTest {
         @Test
         void shouldJournalBeforeRetryAndDiscardOnSuccess() {
             when(client.commitReservation(eq("res-1"), any(Object.class)))
+                    .thenThrow(new RuntimeException("response lost"))
                     .thenReturn(CyclesResponse.success(200, commitSuccess()));
 
             JournaledCommitRetryEngine engine = new JournaledCommitRetryEngine(client, properties);
@@ -134,7 +136,9 @@ class JournaledCommitRetryEngineTest {
             assertThat(Files.exists(journalFile("res-1"))).isTrue();
 
             await().atMost(3, TimeUnit.SECONDS).untilAsserted(() -> {
-                verify(client).commitReservation(eq("res-1"), any(Object.class));
+                ArgumentCaptor<Object> bodies = ArgumentCaptor.forClass(Object.class);
+                verify(client, times(2)).commitReservation(eq("res-1"), bodies.capture());
+                assertThat(bodies.getAllValues()).containsExactly(COMMIT_BODY, COMMIT_BODY);
                 assertThat(Files.exists(journalFile("res-1"))).isFalse();
             });
         }
@@ -256,11 +260,17 @@ class JournaledCommitRetryEngineTest {
     class ExpiredFallback {
 
         @Test
-        void shouldDeliverEventFallbackImmediatelyWhenExpired() {
+        void shouldPersistEventModeBeforeDeliveringExpiredFallback() {
             when(client.commitReservation(eq("res-exp"), any(Object.class)))
                     .thenReturn(expiredResponse());
             when(client.createEvent(any(Object.class)))
-                    .thenReturn(CyclesResponse.success(201, eventSuccess("ev-1")));
+                    .thenAnswer(invocation -> {
+                        PendingCommitRecord persisted = PendingCommitRecord.fromJson(
+                                Files.readString(journalFile("res-exp")));
+                        assertThat(persisted.getMode()).isEqualTo(PendingCommitRecord.MODE_EVENT);
+                        assertThat(persisted.getEventFallbackBody()).isEqualTo(EVENT_FALLBACK);
+                        return CyclesResponse.success(201, eventSuccess("ev-1"));
+                    });
 
             JournaledCommitRetryEngine engine = new JournaledCommitRetryEngine(client, properties);
             engine.schedule("res-exp", COMMIT_BODY, EVENT_FALLBACK, null);
@@ -582,31 +592,30 @@ class JournaledCommitRetryEngineTest {
         }
 
         @Test
-        void shouldReplayOnlyOncePerIdentityPerJvm() throws Exception {
+        void shouldReplayConcurrentlyWithSameKeyAndRemoveRecord() {
             writeRecord(API_KEY, null, new PendingCommitRecord("res-once", BASE_URL,
                     PendingCommitRecord.MODE_COMMIT, COMMIT_BODY, EVENT_FALLBACK,
                     System.currentTimeMillis(), null));
+            CountDownLatch bothArrived = new CountDownLatch(2);
             when(client.commitReservation(eq("res-once"), any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200, commitSuccess()));
+                    .thenAnswer(invocation -> {
+                        bothArrived.countDown();
+                        assertThat(bothArrived.await(2, TimeUnit.SECONDS)).isTrue();
+                        return CyclesResponse.success(200, commitSuccess());
+                    });
 
             new JournaledCommitRetryEngine(client, properties);
-            await().atMost(3, TimeUnit.SECONDS)
-                    .untilAsserted(() -> verify(client, times(1)).commitReservation(eq("res-once"), any(Object.class)));
-
-            // Re-journal the same record and build a second engine for the same
-            // identity: the claim is already held, so nothing replays again.
-            writeRecord(API_KEY, null, new PendingCommitRecord("res-once", BASE_URL,
-                    PendingCommitRecord.MODE_COMMIT, COMMIT_BODY, EVENT_FALLBACK,
-                    System.currentTimeMillis(), null));
-            new JournaledCommitRetryEngine(client, properties);
-            Thread.sleep(300);
-            verify(client, times(1)).commitReservation(eq("res-once"), any(Object.class));
-
-            // After a claims reset (fresh JVM), the surviving record replays
+            // Model a separate process: only the durable record crosses the
+            // boundary; the second worker has no in-memory replay claim.
             JournaledCommitRetryEngine.resetReplayClaimsForTesting();
             new JournaledCommitRetryEngine(client, properties);
-            await().atMost(3, TimeUnit.SECONDS)
-                    .untilAsserted(() -> verify(client, times(2)).commitReservation(eq("res-once"), any(Object.class)));
+
+            await().atMost(3, TimeUnit.SECONDS).untilAsserted(() -> {
+                ArgumentCaptor<Object> bodies = ArgumentCaptor.forClass(Object.class);
+                verify(client, times(2)).commitReservation(eq("res-once"), bodies.capture());
+                assertThat(bodies.getAllValues()).containsExactly(COMMIT_BODY, COMMIT_BODY);
+                assertThat(Files.exists(journalFile("res-once"))).isFalse();
+            });
         }
 
         @Test
@@ -624,11 +633,15 @@ class JournaledCommitRetryEngineTest {
         }
 
         @Test
-        void shouldSurviveApiKeyRotationWhenTenantScoped() {
+        void shouldSurviveApiKeyRotationWhenTenantScoped() throws Exception {
             // Recorded under (tenant acme, old key); replayed under (tenant acme, new key)
             writeRecord("old-key", "acme", new PendingCommitRecord("res-rot", BASE_URL,
                     PendingCommitRecord.MODE_COMMIT, COMMIT_BODY, EVENT_FALLBACK,
                     System.currentTimeMillis(), null));
+            Path persisted = identityDir("old-key", "acme")
+                    .resolve(standardFileName("res-rot"));
+            assertThat(persisted.toString()).doesNotContain("old-key");
+            assertThat(Files.readString(persisted)).doesNotContain("old-key");
             when(client.commitReservation(eq("res-rot"), any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, commitSuccess()));
 

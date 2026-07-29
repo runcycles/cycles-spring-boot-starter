@@ -23,6 +23,9 @@ The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.
 - Retain durable settlement records for contradictory retryable 4xx envelopes,
   and report heartbeat transport failures with their same-key retry or stop
   disposition.
+- Quarantine corrupt, semantically invalid, and unsupported-version journal
+  records without blocking replay of valid work, and report exact native test
+  evidence from the shared recovery-conformance adapter.
 
 ## [0.3.1] - 2026-07-27
 
