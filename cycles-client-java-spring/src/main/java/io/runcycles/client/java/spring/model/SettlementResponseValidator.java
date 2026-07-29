@@ -50,7 +50,7 @@ public final class SettlementResponseValidator {
                 && body != null
                 && exactKeys(body, Set.of("status", "event_id"), EVENT_FIELDS)
                 && "APPLIED".equals(body.get("status"))
-                && body.get("event_id") instanceof String id
+                && body.get("event_id") instanceof String
                 && optionalAmount(body, "charged")
                 && optionalBalances(body, "balances");
     }
