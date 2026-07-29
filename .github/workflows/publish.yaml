@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: runcycles/cycles-protocol
-          ref: 8a22803316d91b85e444f4fb40ff2b8426f11773
+          ref: 594631c14710da08ad5e00125d899d642213c296
           path: .cycles-protocol
           persist-credentials: false
       - run: python -m pip install PyYAML
