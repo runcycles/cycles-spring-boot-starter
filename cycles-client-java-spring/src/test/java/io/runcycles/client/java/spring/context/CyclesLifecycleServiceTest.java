@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.lang.reflect.Method;
 import java.math.BigInteger;
@@ -164,8 +165,37 @@ class CyclesLifecycleServiceTest {
 
             assertThat(result).isEqualTo("hello");
             verify(client).createReservation(any(Object.class));
-            verify(client).commitReservation(eq("res-1"), any(Object.class));
+            InOrder settlementOrder = inOrder(retryEngine, client);
+            settlementOrder.verify(retryEngine).persistPending(
+                    eq("res-1"), any(), any());
+            settlementOrder.verify(client).commitReservation(
+                    eq("res-1"), any(Object.class));
+            settlementOrder.verify(retryEngine).discardPending("res-1");
             verify(client, never()).releaseReservation(anyString(), any(Object.class));
+        }
+
+        @Test
+        void shouldTreatProtocolInvalidCommit2xxAsAmbiguous() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            Method method = dummyMethod();
+            Object[] args = {100};
+            when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
+            when(requestBuilderService.buildReservation(
+                    any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-ambiguous")));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(eq("res-ambiguous"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, Map.of("status", "COMMITTED")));
+
+            service.executeWithReservation(
+                    () -> "ok", cycles, method, args, this, "llm", "complete");
+
+            verify(retryEngine).persistPending(eq("res-ambiguous"), any(), any());
+            verify(retryEngine).schedule(eq("res-ambiguous"), any(), any(), isNull());
+            verify(retryEngine, never()).discardPending("res-ambiguous");
         }
 
         @Test
@@ -977,6 +1007,8 @@ class CyclesLifecycleServiceTest {
 
             // Should release reservation since action threw
             verify(client).releaseReservation(eq("res-noactual"), any(Object.class));
+            verify(client, never()).commitReservation(anyString(), any(Object.class));
+            verify(retryEngine, never()).scheduleEvent(anyString(), any());
         }
     }
 
@@ -1616,23 +1648,53 @@ class CyclesLifecycleServiceTest {
             when(client.createReservation(any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, allowResponse("res-ext-exc")));
             when(requestBuilderService.buildExtend(anyLong(), isNull()))
-                    .thenThrow(new RuntimeException("Network down"));
+                    .thenReturn(Map.of("idempotency_key", "ext-1", "extend_by_ms", 20000L));
+            when(client.extendReservation(eq("res-ext-exc"), any(Object.class)))
+                    .thenThrow(new RuntimeException("Network down"))
+                    .thenReturn(CyclesResponse.success(200,
+                            Map.of("status", "ACTIVE", "expires_at_ms", 2_000_000L)));
             when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
                     .thenReturn(Map.of("idempotency_key", "com-1"));
             when(client.commitReservation(anyString(), any(Object.class)))
                     .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
 
-            Object result = service.executeWithReservation(
-                    () -> {
-                        // Heartbeat fires but throws — should not crash the action
-                        capturedHeartbeat.get().run();
-                        return "ok";
-                    },
-                    cycles, method, args, target,
-                    "llm", "complete"
-            );
+            var appender = attachWarnAppender();
+            try {
+                Object result = service.executeWithReservation(
+                        () -> {
+                            // Heartbeat fires but throws — should not crash the action
+                            capturedHeartbeat.get().run();
+                            capturedHeartbeat.get().run();
+                            return "ok";
+                        },
+                        cycles, method, args, target,
+                        "llm", "complete"
+                );
 
-            assertThat(result).isEqualTo("ok");
+                assertThat(result).isEqualTo("ok");
+                ArgumentCaptor<Object> extendBodies = ArgumentCaptor.forClass(Object.class);
+                verify(client, times(2)).extendReservation(
+                        eq("res-ext-exc"), extendBodies.capture());
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> sent = extendBodies.getAllValues().stream()
+                        .map(value -> (Map<String, Object>) value)
+                        .toList();
+                assertThat(sent).allSatisfy(body ->
+                        assertThat(body.get("extend_by_ms")).isEqualTo(20000L));
+                assertThat(sent.get(0).get("idempotency_key"))
+                        .isEqualTo(sent.get(1).get("idempotency_key"));
+                verify(client).commitReservation(eq("res-ext-exc"), any(Object.class));
+                assertThat(appender.list)
+                        .filteredOn(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN)
+                        .extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                        .anySatisfy(message -> {
+                            assertThat(message).contains("Heartbeat extend transport error");
+                            assertThat(message).contains("same idempotency key");
+                            assertThat(message).contains("res-ext-exc");
+                        });
+            } finally {
+                detachAppender(appender);
+            }
         }
 
         // Mock future returned by the one-shot schedule, kept so tests can verify
@@ -3403,9 +3465,9 @@ class CyclesLifecycleServiceTest {
             );
             assertThat(result).isEqualTo("ok");
 
-            // Should not release or retry for unrecognized status
+            // Ambiguous status retains the spend and retries with the same key.
             verify(client, never()).releaseReservation(anyString(), any(Object.class));
-            verify(retryEngine, never()).schedule(anyString(), any(), any(), any());
+            verify(retryEngine).schedule(eq("res-weird"), any(), any(), isNull());
             verify(retryEngine, never()).scheduleEvent(anyString(), any());
         }
     }

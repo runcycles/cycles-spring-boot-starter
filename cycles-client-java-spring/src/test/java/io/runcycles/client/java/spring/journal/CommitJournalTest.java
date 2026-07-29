@@ -2,10 +2,15 @@ package io.runcycles.client.java.spring.journal;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -121,7 +126,8 @@ class CommitJournalTest {
         void shouldWriteCrossSdkSnakeCaseKeys() throws IOException {
             journal().record(commitRecord("res-keys", BASE_URL, 123L));
 
-            String raw = Files.readString(dir.resolve("res-keys.json"));
+            String raw = Files.readString(
+                    dir.resolve(CommitJournal.safeName("res-keys") + ".json"));
             Map<String, Object> data = MAPPER.readValue(raw, new TypeReference<Map<String, Object>>() {});
             assertThat(data.keySet()).containsExactly(
                     "version", "reservation_id", "base_url", "mode",
@@ -150,14 +156,35 @@ class CommitJournalTest {
         }
 
         @Test
-        void shouldSanitizeUnsafeReservationIdsInFileNames() {
+        void shouldUseCrossSdkDigestNamesForExactUtf8ReservationIds() {
             journal().record(commitRecord("res/1:2..x", BASE_URL, null));
 
-            assertThat(Files.exists(dir.resolve("res_1_2__x.json"))).isTrue();
+            Path standard = dir.resolve(CommitJournal.safeName("res/1:2..x") + ".json");
+            assertThat(Files.exists(standard)).isTrue();
+            assertThat(CommitJournal.safeName("r🚀"))
+                    .isEqualTo("v2-34c5b33347a139e63c81ea72943cc15dd4c2087dc1eaa756a78f3c49974e0b87");
             assertThat(journal().loadPending(BASE_URL)).hasSize(1);
 
             journal().discard("res/1:2..x");
-            assertThat(Files.exists(dir.resolve("res_1_2__x.json"))).isFalse();
+            assertThat(Files.exists(standard)).isFalse();
+        }
+
+        @Test
+        void shouldKeepCollidingLegacyIdsDistinctAndMigrateSafely() throws IOException {
+            journal().record(commitRecord("rsv/a", BASE_URL, null));
+            journal().record(commitRecord("rsv_a", BASE_URL, null));
+            assertThat(CommitJournal.safeName("rsv/a"))
+                    .isNotEqualTo(CommitJournal.safeName("rsv_a"));
+
+            Path legacy = dir.resolve("rsv_a.json");
+            Files.writeString(legacy, commitRecord("rsv/a", BASE_URL, null).toJson());
+            journal().discard("rsv_a");
+            assertThat(legacy).exists();
+            List<PendingCommitRecord> loaded = journal().loadPending(BASE_URL);
+            assertThat(legacy).doesNotExist();
+            assertThat(dir.resolve(CommitJournal.safeName("rsv/a") + ".json")).exists();
+            assertThat(loaded).extracting(PendingCommitRecord::getReservationId)
+                    .containsExactly("rsv/a");
         }
 
         @Test
@@ -197,15 +224,38 @@ class CommitJournalTest {
     class Quarantine {
 
         @Test
-        void shouldQuarantineUnparseableFiles() throws IOException {
+        void shouldQuarantineCorruptAndUnsupportedRecordsWithoutBlockingValidReplay() throws IOException {
+            Logger logger = (Logger) LoggerFactory.getLogger(CommitJournal.class);
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.addAppender(appender);
             Files.writeString(dir.resolve("res-bad.json"), "{not valid json");
+            Files.writeString(dir.resolve("res-future.json"),
+                    commitRecord("res-future", BASE_URL, null).toJson()
+                            .replace("\"version\":1", "\"version\":2"));
+            Files.writeString(dir.resolve("res-array.json"), "[]");
             journal().record(commitRecord("res-good", BASE_URL, null));
 
-            List<PendingCommitRecord> loaded = journal().loadPending(BASE_URL);
-            assertThat(loaded).hasSize(1);
-            assertThat(loaded.get(0).getReservationId()).isEqualTo("res-good");
-            assertThat(Files.exists(dir.resolve("res-bad.json"))).isFalse();
-            assertThat(Files.exists(dir.resolve("res-bad.corrupt"))).isTrue();
+            try {
+                List<PendingCommitRecord> loaded = journal().loadPending(BASE_URL);
+                assertThat(loaded).hasSize(1);
+                assertThat(loaded.get(0).getReservationId()).isEqualTo("res-good");
+                assertThat(Files.exists(dir.resolve("res-bad.json"))).isFalse();
+                assertThat(Files.exists(dir.resolve("res-bad.corrupt"))).isTrue();
+                assertThat(Files.exists(dir.resolve("res-future.json"))).isFalse();
+                assertThat(Files.exists(dir.resolve("res-future.corrupt"))).isTrue();
+                assertThat(Files.exists(dir.resolve("res-array.json"))).isFalse();
+                assertThat(Files.exists(dir.resolve("res-array.corrupt"))).isTrue();
+                assertThat(appender.list)
+                        .filteredOn(event -> event.getLevel() == Level.WARN)
+                        .extracting(ILoggingEvent::getFormattedMessage)
+                        .filteredOn(message -> message.contains("Skipping corrupt journal entry"))
+                        .hasSize(3)
+                        .anySatisfy(message -> assertThat(message).contains("res-future.json"));
+            } finally {
+                logger.detachAppender(appender);
+                appender.stop();
+            }
         }
 
         @Test
@@ -250,7 +300,7 @@ class CommitJournalTest {
             // plain IOException (not AtomicMoveNotSupportedException), which must
             // propagate to record()'s failure handling — temp cleanup, no throw —
             // rather than being retried non-atomically.
-            Path blockedTarget = dir.resolve("res-blk.json");
+            Path blockedTarget = dir.resolve(CommitJournal.safeName("res-blk") + ".json");
             Files.createDirectory(blockedTarget);
             Files.writeString(blockedTarget.resolve("child"), "occupied");
 
@@ -273,15 +323,43 @@ class CommitJournalTest {
 
         @Test
         void shouldRejectMissingReservationId() {
-            assertThatThrownBy(() -> PendingCommitRecord.fromJson("{\"mode\":\"commit\",\"commit_body\":{}}"))
+            assertThatThrownBy(() -> PendingCommitRecord.fromJson(
+                    "{\"version\":1,\"mode\":\"commit\",\"commit_body\":{}}"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("reservation_id");
         }
 
         @Test
+        void shouldRejectUnsupportedVersion() {
+            assertThatThrownBy(() -> PendingCommitRecord.fromJson(
+                    "{\"version\":2,\"reservation_id\":\"r1\",\"commit_body\":{}}"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("unsupported journal version");
+        }
+
+        @Test
+        void shouldRejectInvalidOptionalFields() {
+            assertThatThrownBy(() -> PendingCommitRecord.fromJson(
+                    "{\"version\":1,\"reservation_id\":\"r1\",\"commit_body\":{},"
+                            + "\"base_url\":7}"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("base_url");
+            assertThatThrownBy(() -> PendingCommitRecord.fromJson(
+                    "{\"version\":1,\"reservation_id\":\"r1\",\"commit_body\":{},"
+                            + "\"recorded_at_ms\":-1}"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("recorded_at_ms");
+            assertThatThrownBy(() -> PendingCommitRecord.fromJson(
+                    "{\"version\":1,\"reservation_id\":\"r1\",\"commit_body\":{},"
+                            + "\"event_fallback_body\":\"bad\"}"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("event_fallback_body");
+        }
+
+        @Test
         void shouldRejectEmptyReservationId() {
             assertThatThrownBy(() -> PendingCommitRecord.fromJson(
-                    "{\"reservation_id\":\"\",\"mode\":\"commit\",\"commit_body\":{}}"))
+                    "{\"version\":1,\"reservation_id\":\"\",\"mode\":\"commit\",\"commit_body\":{}}"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("reservation_id");
         }
@@ -289,7 +367,7 @@ class CommitJournalTest {
         @Test
         void shouldRejectUnknownMode() {
             assertThatThrownBy(() -> PendingCommitRecord.fromJson(
-                    "{\"reservation_id\":\"r1\",\"mode\":\"banana\"}"))
+                    "{\"version\":1,\"reservation_id\":\"r1\",\"mode\":\"banana\"}"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("unknown mode");
         }
@@ -297,7 +375,7 @@ class CommitJournalTest {
         @Test
         void shouldRejectCommitModeWithoutCommitBody() {
             assertThatThrownBy(() -> PendingCommitRecord.fromJson(
-                    "{\"reservation_id\":\"r1\",\"mode\":\"commit\"}"))
+                    "{\"version\":1,\"reservation_id\":\"r1\",\"mode\":\"commit\"}"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("commit_body");
         }
@@ -305,7 +383,7 @@ class CommitJournalTest {
         @Test
         void shouldRejectEventModeWithoutEventFallbackBody() {
             assertThatThrownBy(() -> PendingCommitRecord.fromJson(
-                    "{\"reservation_id\":\"r1\",\"mode\":\"event\",\"commit_body\":{}}"))
+                    "{\"version\":1,\"reservation_id\":\"r1\",\"mode\":\"event\",\"commit_body\":{}}"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("event_fallback_body");
         }
@@ -313,7 +391,7 @@ class CommitJournalTest {
         @Test
         void shouldDefaultToCommitModeAndEmptyBaseUrl() throws Exception {
             PendingCommitRecord entry = PendingCommitRecord.fromJson(
-                    "{\"reservation_id\":\"r1\",\"commit_body\":{\"k\":\"v\"}}");
+                    "{\"version\":1,\"reservation_id\":\"r1\",\"commit_body\":{\"k\":\"v\"}}");
             assertThat(entry.getMode()).isEqualTo("commit");
             assertThat(entry.getBaseUrl()).isEmpty();
             assertThat(entry.getRecordedAtMs()).isZero();

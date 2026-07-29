@@ -147,6 +147,10 @@ public final class PendingCommitRecord {
     public static PendingCommitRecord fromJson(String raw) throws JsonProcessingException {
         Map<String, Object> data = MAPPER.readValue(raw, MAP_TYPE);
 
+        Object rawVersion = data.get("version");
+        if (!(rawVersion instanceof Integer version) || version != RECORD_VERSION) {
+            throw new IllegalArgumentException("unsupported journal version: " + rawVersion);
+        }
         Object rawReservationId = data.get("reservation_id");
         if (!(rawReservationId instanceof String reservationId) || reservationId.isEmpty()) {
             throw new IllegalArgumentException("journal record missing reservation_id");
@@ -162,16 +166,38 @@ public final class PendingCommitRecord {
         if (MODE_EVENT.equals(mode) && !(data.get("event_fallback_body") instanceof Map)) {
             throw new IllegalArgumentException("event-mode journal record missing event_fallback_body");
         }
+        for (String bodyKey : new String[] {"commit_body", "event_fallback_body"}) {
+            Object body = data.get(bodyKey);
+            if (body != null && !(body instanceof Map)) {
+                throw new IllegalArgumentException("journal record has invalid " + bodyKey);
+            }
+        }
+        if (data.containsKey("base_url") && !(data.get("base_url") instanceof String)) {
+            throw new IllegalArgumentException("journal record has invalid base_url");
+        }
 
         String baseUrl = data.get("base_url") instanceof String s ? s : "";
         Map<String, Object> commitBody = data.get("commit_body") instanceof Map<?, ?> m
                 ? (Map<String, Object>) m : null;
         Map<String, Object> eventFallbackBody = data.get("event_fallback_body") instanceof Map<?, ?> m
                 ? (Map<String, Object>) m : null;
-        long recordedAtMs = data.get("recorded_at_ms") instanceof Number n ? n.longValue() : 0L;
-        Long notBeforeMs = data.get("not_before_ms") instanceof Number n ? n.longValue() : null;
+        long recordedAtMs = nonNegativeInteger(data, "recorded_at_ms", 0L);
+        Long notBeforeMs = data.get("not_before_ms") == null
+                ? null : nonNegativeInteger(data, "not_before_ms", 0L);
 
         return new PendingCommitRecord(reservationId, baseUrl, mode, commitBody,
                 eventFallbackBody, recordedAtMs, notBeforeMs);
+    }
+
+    private static long nonNegativeInteger(Map<String, Object> data, String key, long defaultValue) {
+        Object raw = data.get(key);
+        if (raw == null && !data.containsKey(key)) {
+            return defaultValue;
+        }
+        if (!(raw instanceof Integer || raw instanceof Long)
+                || ((Number) raw).longValue() < 0) {
+            throw new IllegalArgumentException("journal record has invalid " + key);
+        }
+        return ((Number) raw).longValue();
     }
 }

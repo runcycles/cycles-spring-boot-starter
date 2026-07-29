@@ -612,6 +612,7 @@ public class CyclesLifecycleService {
 
     private void handleCommit(String reservationId, Map<String, Object> commitBody,
                               Map<String, Object> eventFallbackBody) {
+        retryEngine.persistPending(reservationId, commitBody, eventFallbackBody);
         try {
             LOG.debug("Committing reservation: reservationId={}, commitBody={}", reservationId, commitBody);
             long comT1 = System.currentTimeMillis();
@@ -619,13 +620,19 @@ public class CyclesLifecycleService {
             long comT2 = System.currentTimeMillis();
             LOG.debug("Commit done: elapsedTime={}ms, response={}", (comT2 - comT1), commitResponse);
 
-            if (commitResponse.is2xx()) {
+            if (SettlementResponseValidator.isCommitSuccess(commitResponse)) {
+                retryEngine.discardPending(reservationId);
                 CommitResult commitResult = CommitResult.fromMap(commitResponse.getBody());
                 LOG.info("Commit successful: reservationId={}, status={}, charged={}, released={}",
                         reservationId,
                         commitResult != null ? commitResult.getStatus() : null,
                         commitResult != null ? commitResult.getCharged() : null,
                         commitResult != null ? commitResult.getReleased() : null);
+            } else if (commitResponse.is2xx()) {
+                LOG.warn("Commit returned an ambiguous protocol-invalid 2xx; scheduling same-key "
+                                + "retry: reservationId={}, status={}",
+                        reservationId, commitResponse.getStatus());
+                retryEngine.schedule(reservationId, commitBody, eventFallbackBody, null);
             } else {
                 LOG.error("Commit failed: reservationId={}, reason={}, responseBody={}",
                         reservationId, commitResponse.getErrorMessage(), commitResponse.getBody());
@@ -655,13 +662,26 @@ public class CyclesLifecycleService {
                             + "reservationId={}", reservationId);
                     retryEngine.scheduleEvent(reservationId, eventFallbackBody);
                 } else if (commitErrorCode == ErrorCode.RESERVATION_FINALIZED) {
+                    retryEngine.discardPending(reservationId);
                     LOG.warn("Reservation already finalized, skipping release: reservationId={}", reservationId);
                 } else if (commitErrorCode == ErrorCode.IDEMPOTENCY_MISMATCH) {
+                    retryEngine.discardPending(reservationId);
                     LOG.warn("Commit idempotency mismatch (not releasing): reservationId={}", reservationId);
-                } else if (commitResponse.is4xx()) {
+                } else if (commitResponse.is4xx()
+                        && commitErrorCode != null
+                        && commitErrorCode != ErrorCode.UNKNOWN
+                        && !commitErrorCode.isRetryable()) {
+                    retryEngine.discardPending(reservationId);
                     handleRelease(reservationId, "commit_rejected_" + commitErrorCode);
+                } else if (commitResponse.is4xx()) {
+                    LOG.error("Commit got unclassifiable client error (status={}, error={}); "
+                                    + "scheduling same-key replay: reservationId={}",
+                            commitResponse.getStatus(), commitErrorCode, reservationId);
+                    retryEngine.schedule(reservationId, commitBody, eventFallbackBody, null);
                 } else {
-                    LOG.warn("Unrecognized response: response={}", commitResponse);
+                    LOG.warn("Unrecognized response; scheduling same-key replay: response={}",
+                            commitResponse);
+                    retryEngine.schedule(reservationId, commitBody, eventFallbackBody, null);
                 }
             }
 
@@ -1106,12 +1126,16 @@ public class CyclesLifecycleService {
                         }
                     } catch (Exception e) {
                         if (fieldMode) {
-                            LOG.warn("Heartbeat extend error in field mode, applying recovery: reservationId={}",
-                                    reservationId, e);
                             fieldRecovery(null, false);
+                            if (!stopped.get()) {
+                                LOG.warn("Heartbeat extend transport error; retrying with the same "
+                                                + "idempotency key in {}ms: reservationId={}",
+                                        delayMs.get(), reservationId, e);
+                            }
                         } else {
-                            LOG.warn("Heartbeat extend error, will retry next beat with the same idempotency key: "
-                                    + "reservationId={}", reservationId, e);
+                            LOG.warn("Heartbeat extend transport error; retrying next beat with the "
+                                            + "same idempotency key in {}ms: reservationId={}",
+                                    delayMs.get(), reservationId, e);
                         }
                     }
                 }
