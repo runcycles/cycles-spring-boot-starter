@@ -26,7 +26,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: runcycles/cycles-protocol
-          ref: 594631c14710da08ad5e00125d899d642213c296
+          ref: bc12e1fc4b17e272614b63d5e3cb0bea408885af
           path: .cycles-protocol
           persist-credentials: false
       - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
@@ -39,4 +39,16 @@ jobs:
         run: >-
           python .cycles-protocol/scripts/run_client_recovery_conformance.py
           --claim durable
+          --report-json recovery-conformance.json
+          --implementation runcycles/cycles-spring-boot-starter
+          --implementation-commit ${{ github.event.pull_request.head.sha || github.sha }}
+          --evidence-url https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           --adapter python scripts/recovery_conformance_adapter.py
+      - name: Upload recovery conformance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: recovery-conformance-${{ github.event.pull_request.head.sha || github.sha }}
+          path: recovery-conformance.json
+          if-no-files-found: error
+          retention-days: 90
