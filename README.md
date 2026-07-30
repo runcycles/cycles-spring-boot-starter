@@ -1,4 +1,5 @@
 [![CI](https://github.com/runcycles/cycles-spring-boot-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/runcycles/cycles-spring-boot-starter/actions)
+[![Recovery conformance](https://img.shields.io/github/actions/workflow/status/runcycles/cycles-spring-boot-starter/ci.yml?branch=main&label=recovery%20conformance)](https://runcycles.io/protocol/sdk-recovery-conformance)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-85%25-brightgreen)](https://github.com/runcycles/cycles-spring-boot-starter/actions)
 
