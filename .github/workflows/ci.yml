@@ -26,7 +26,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: runcycles/cycles-protocol
-          ref: b27d7cb38a8f2bd915dea64e4369a2b91f31008c
+          ref: bc12e1fc4b17e272614b63d5e3cb0bea408885af
           path: .cycles-protocol
           persist-credentials: false
       - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
