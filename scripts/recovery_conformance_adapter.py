@@ -12,48 +12,61 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "cycles-client-java-spring"
 
+# The class wildcard is intentional: Surefire's Class#method form does not
+# discover methods declared in JUnit @Nested classes, while Class*#method does.
 TESTS = {
     "CR-CORE-001": [
-        "JournaledCommitRetryEngineTest#shouldJournalBeforeRetryAndDiscardOnSuccess",
+        "JournaledCommitRetryEngineTest*#shouldJournalBeforeRetryAndDiscardOnSuccess",
     ],
     "CR-CORE-002": [
-        "JournaledCommitRetryEngineTest#shouldPersistEventModeBeforeDeliveringExpiredFallback",
+        "JournaledCommitRetryEngineTest*#shouldPersistEventModeBeforeDeliveringExpiredFallback",
     ],
     "CR-CORE-003": [
-        "CyclesLifecycleServiceTest#shouldHandleExtendExceptionGracefully",
+        "CyclesLifecycleServiceTest*#shouldHandleExtendExceptionGracefully",
     ],
     "CR-CORE-004": [
-        "CyclesLifecycleServiceTest#shouldTreatProtocolInvalidCommit2xxAsAmbiguous",
+        "CyclesLifecycleServiceTest*#shouldTreatProtocolInvalidCommit2xxAsAmbiguous",
     ],
     "CR-DURABLE-001": [
-        "JournaledCommitRetryEngineTest#shouldJournalBeforeRetryAndDiscardOnSuccess",
-        "CyclesLifecycleServiceTest#shouldExecuteFullLifecycle",
-        "JournaledCommitRetryEngineTest#shouldReplayJournaledCommitOnConstruction",
+        "JournaledCommitRetryEngineTest*#shouldJournalBeforeRetryAndDiscardOnSuccess",
+        "CyclesLifecycleServiceTest*#shouldExecuteFullLifecycle",
+        "JournaledCommitRetryEngineTest*#shouldReplayJournaledCommitOnConstruction",
     ],
     "CR-DURABLE-002": [
-        "JournaledCommitRetryEngineTest#shouldPersistEventModeBeforeDeliveringExpiredFallback",
-        "JournaledCommitRetryEngineTest#shouldReplayEventModeRecord",
+        "JournaledCommitRetryEngineTest*#shouldPersistEventModeBeforeDeliveringExpiredFallback",
+        "JournaledCommitRetryEngineTest*#shouldReplayEventModeRecord",
     ],
     "CR-DURABLE-003": [
-        "JournaledCommitRetryEngineTest#shouldTreat429AsTransientHonorRetryAfterFloorAndPersistNotBefore",
-        "JournaledCommitRetryEngineTest#shouldHonorFutureNotBeforeFloorOnReplay",
+        "JournaledCommitRetryEngineTest*#shouldTreat429AsTransientHonorRetryAfterFloorAndPersistNotBefore",
+        "JournaledCommitRetryEngineTest*#shouldHonorFutureNotBeforeFloorOnReplay",
     ],
     "CR-DURABLE-004": [
-        "JournaledCommitRetryEngineTest#shouldSurviveApiKeyRotationWhenTenantScoped",
+        "JournaledCommitRetryEngineTest*#shouldSurviveApiKeyRotationWhenTenantScoped",
     ],
     "CR-DURABLE-005": [
-        "CommitJournalTest#shouldQuarantineCorruptAndUnsupportedRecordsWithoutBlockingValidReplay",
+        "CommitJournalTest*#shouldQuarantineCorruptAndUnsupportedRecordsWithoutBlockingValidReplay",
     ],
     "CR-DURABLE-006": [
-        "JournaledCommitRetryEngineTest#shouldReplayConcurrentlyWithSameKeyAndRemoveRecord",
+        "JournaledCommitRetryEngineTest*#shouldReplayConcurrentlyWithSameKeyAndRemoveRecord",
     ],
     "CR-DURABLE-007": [
-        "CommitJournalTest#shouldKeepCollidingLegacyIdsDistinctAndMigrateSafely",
+        "CommitJournalTest*#shouldKeepCollidingLegacyIdsDistinctAndMigrateSafely",
     ],
     "CR-BOUNDARY-001": [
-        "CyclesLifecycleServiceTest#shouldThrowWhenActualRequiredButNotProvided",
+        "CyclesLifecycleServiceTest*#shouldThrowWhenActualRequiredButNotProvided",
     ],
 }
+
+DIAGNOSTIC_LINE_LIMIT = 40
+
+
+def diagnostic_tail(completed: subprocess.CompletedProcess[str]) -> str:
+    output = "\n".join(
+        part.strip()
+        for part in (completed.stdout, completed.stderr)
+        if part and part.strip()
+    )
+    return "\n".join(output.splitlines()[-DIAGNOSTIC_LINE_LIMIT:])
 
 
 def main() -> int:
@@ -71,26 +84,37 @@ def main() -> int:
     mvn = "mvn.cmd" if os.name == "nt" else "mvn"
     executed = []
     passed = True
-    last_code = 0
+    diagnostic = ""
     for test_id in TESTS[scenario_id]:
         completed = subprocess.run(
-            [mvn, "-q", f"-Dtest={test_id}", "test"],
+            [
+                mvn,
+                "-q",
+                "-Dstyle.color=never",
+                "-Dsurefire.failIfNoSpecifiedTests=true",
+                f"-Dtest={test_id}",
+                "test",
+            ],
             cwd=MODULE, text=True, capture_output=True, check=False,
         )
         executed.append(test_id)
-        last_code = completed.returncode
         if completed.stdout:
             print(completed.stdout, file=sys.stderr, end="")
         if completed.stderr:
             print(completed.stderr, file=sys.stderr, end="")
         if completed.returncode != 0:
             passed = False
+            diagnostic = f"native Maven test {test_id} exited {completed.returncode}"
+            if tail := diagnostic_tail(completed):
+                diagnostic = f"{diagnostic}:\n{tail}"
             break
+    if passed:
+        diagnostic = f"executed {len(executed)} native Maven test selector(s)"
     json.dump({
         "scenario_id": scenario_id,
         "passed": passed,
         "native_tests": executed,
-        "diagnostic": f"native Maven test exit code {last_code}",
+        "diagnostic": diagnostic,
     }, sys.stdout)
     return 0
 
