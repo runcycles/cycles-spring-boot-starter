@@ -17,7 +17,7 @@ Reserve budget around guarded method executions using a **reserve / execute / co
 <dependency>
     <groupId>io.runcycles</groupId>
     <artifactId>cycles-client-java-spring</artifactId>
-    <version>0.3.2</version>
+    <version>0.3.3</version>
 </dependency>
 ```
 
@@ -111,12 +111,12 @@ public String generateText(String prompt, int tokens) { ... }
 | Commit fails (5xx / network) | **Retry** | Journaled to disk, then exponential backoff; see `cycles.retry.*` / `cycles.journal.*` config |
 | Commit gets 429 / LIMIT_EXCEEDED | **Retry** | Rate-limited, not rejected; the server's `Retry-After` floors the next delay |
 | Commit gets 401 / 403 | **Neither** | Journaled for replay after credentials are fixed; never released (the spend already happened) |
-| Commit fails (non-retryable 4xx) | **Release** | Reservation released after non-retryable client error |
+| Commit fails (recognized non-retryable 4xx) | **Neither** | Retry stops and the journal entry is discarded, but known spend is never released |
 | Commit gets RESERVATION_EXPIRED | **Recover** | Server already reclaimed budget on TTL expiry; spend is recorded via `POST /v1/events` instead |
 | Commit gets RESERVATION_FINALIZED | **Neither** | Already committed or released (idempotent replay) |
 | Commit gets IDEMPOTENCY_MISMATCH | **Neither** | Previous commit already processed; no release attempted |
 
-All exceptions from the guarded method trigger release — no distinction between checked and unchecked exceptions.
+All exceptions thrown by the guarded method trigger release — no distinction between checked and unchecked exceptions. Post-action costing or settlement failures never release known spend; an actual-expression evaluation error commits the estimate with `metadata.actual_source=estimate`.
 
 See [How Reserve-Commit Works](https://runcycles.io/protocol/how-reserve-commit-works-in-cycles) for the full protocol-level explanation.
 

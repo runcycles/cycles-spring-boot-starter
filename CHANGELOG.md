@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.3] - 2026-08-06
+
+### Fixed
+
+- `CyclesLifecycleService` no longer releases a reservation after a recognized
+  terminal commit rejection. The guarded method has already spent the
+  resource, so returning its reserved budget would undercount known spend.
+- Release is now limited to exceptions thrown by the guarded method itself.
+  Unexpected post-action settlement failures surface without releasing known
+  spend.
+- Missing required `actual` configuration fails before reservation or method
+  execution. If an explicit actual expression fails after the method returns,
+  the client commits the estimate and marks `metadata.actual_source=estimate`.
+
+### Tests and docs
+
+- Regression coverage pins preflight actual validation, safe actual-expression
+  fallback, and no-release behavior for terminal commit rejection.
+- README lifecycle guidance now distinguishes method failure from post-action
+  settlement failure.
+
 ## [0.3.2] - 2026-07-29
 
 ### Added
