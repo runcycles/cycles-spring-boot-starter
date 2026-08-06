@@ -430,6 +430,14 @@ public class CyclesLifecycleService {
         long estimate = evaluator.evaluate(estimateExpr, method, args, null, target);
         LOG.debug("Estimated usage: estimate={}", estimate);
 
+        // This is configuration, not a runtime outcome. Validate it before
+        // reserving or running the guarded action so a missing actual cannot
+        // turn completed work into an unsafe release later.
+        if (!cycles.dryRun() && cycles.actual().isBlank()
+                && !cycles.useEstimateIfActualNotProvided()) {
+            throw new IllegalStateException("Actual expression required");
+        }
+
         // Create reservation
         Map<String, Object> createBody = requestBuilderService.buildReservation(
                 cycles, estimate, actionKind, actionName, null, method, args, target);
@@ -523,15 +531,25 @@ public class CyclesLifecycleService {
                 resResult.getRemainingTtlMs(), createRttMs,
                 createAttempt.receivedNanos(), ctx);
 
+        boolean guardedActionCompleted = false;
         try {
             // Execute guarded action
             Object result = action.get();
+            guardedActionCompleted = true;
             long methodElapsed = System.currentTimeMillis() - resT2;
             LOG.debug("Guarded action finished: reservationId={}, methodElapsedMs={}", reservationId, methodElapsed);
 
             // Resolve actual amount
             boolean actualFromEstimate = cycles.actual().isBlank() && cycles.useEstimateIfActualNotProvided();
-            long actualAmount = resolveActualAmount(cycles, estimate, method, args, result, target);
+            long actualAmount;
+            try {
+                actualAmount = resolveActualAmount(cycles, estimate, method, args, result, target);
+            } catch (RuntimeException ex) {
+                LOG.error("Actual expression failed after guarded work completed; committing estimate: "
+                        + "reservationId={}, estimate={}", reservationId, estimate, ex);
+                actualAmount = estimate;
+                actualFromEstimate = true;
+            }
 
             // Build and send commit
             CyclesMetrics metrics = ctx.getMetrics();
@@ -542,8 +560,15 @@ public class CyclesLifecycleService {
                 metrics.setLatencyMs((int) methodElapsed);
             }
 
-            Map<String, Object> commitMetadata = resolveCommitMetadata(
-                    cycles, method, args, result, target, ctx.getCommitMetadata());
+            Map<String, Object> commitMetadata;
+            try {
+                commitMetadata = resolveCommitMetadata(
+                        cycles, method, args, result, target, ctx.getCommitMetadata());
+            } catch (RuntimeException ex) {
+                LOG.error("Commit metadata evaluation failed after guarded work completed; "
+                        + "continuing without annotation metadata: reservationId={}", reservationId, ex);
+                commitMetadata = ctx.getCommitMetadata();
+            }
             if (actualFromEstimate) {
                 // The commit records the estimate as measured spend — mark it so the
                 // server-side record is distinguishable from a genuinely measured actual.
@@ -564,8 +589,13 @@ public class CyclesLifecycleService {
             return result;
 
         } catch (Throwable ex) {
-            LOG.error("Guarded action failed, releasing reservation: reservationId={}", reservationId, ex);
-            handleRelease(reservationId, "guarded_method_failed");
+            if (!guardedActionCompleted) {
+                LOG.error("Guarded action failed, releasing reservation: reservationId={}", reservationId, ex);
+                handleRelease(reservationId, "guarded_method_failed");
+            } else {
+                LOG.error("Post-action settlement failed; not releasing known spend: reservationId={}",
+                        reservationId, ex);
+            }
             throw ex;
         } finally {
             cancelHeartbeat(heartbeatCanceller);
@@ -672,7 +702,8 @@ public class CyclesLifecycleService {
                         && commitErrorCode != ErrorCode.UNKNOWN
                         && !commitErrorCode.isRetryable()) {
                     retryEngine.discardPending(reservationId);
-                    handleRelease(reservationId, "commit_rejected_" + commitErrorCode);
+                    LOG.error("Commit was rejected after spend was recorded locally (error={}); "
+                            + "not releasing known spend: reservationId={}", commitErrorCode, reservationId);
                 } else if (commitResponse.is4xx()) {
                     LOG.error("Commit got unclassifiable client error (status={}, error={}); "
                                     + "scheduling same-key replay: reservationId={}",

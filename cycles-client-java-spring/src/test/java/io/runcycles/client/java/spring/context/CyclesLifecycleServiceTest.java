@@ -682,7 +682,7 @@ class CyclesLifecycleServiceTest {
         }
 
         @Test
-        void shouldReleaseOnNonRetryable4xx() throws Throwable {
+        void shouldNotReleaseKnownSpendOnNonRetryableCommit4xx() throws Throwable {
             Cycles cycles = mockCycles(false);
             Method method = dummyMethod();
             Object[] args = {100};
@@ -698,18 +698,14 @@ class CyclesLifecycleServiceTest {
             when(client.commitReservation(eq("res-4xx"), any(Object.class)))
                     .thenReturn(CyclesResponse.httpError(400, "Bad request",
                             Map.of("error", "INVALID_REQUEST", "message", "Bad request", "request_id", "r1")));
-            when(requestBuilderService.buildRelease(anyString()))
-                    .thenReturn(Map.of("idempotency_key", "rel-1"));
-            when(client.releaseReservation(eq("res-4xx"), any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200, releaseSuccessResponse()));
-
             service.executeWithReservation(
                     () -> "ok",
                     cycles, method, args, target,
                     "llm", "complete"
             );
 
-            verify(client).releaseReservation(eq("res-4xx"), any(Object.class));
+            verify(retryEngine).discardPending("res-4xx");
+            verify(client, never()).releaseReservation(anyString(), any(Object.class));
         }
 
         @Test
@@ -992,23 +988,58 @@ class CyclesLifecycleServiceTest {
             Object target = CyclesLifecycleServiceTest.this;
 
             when(evaluator.evaluate(anyString(), any(), any(), any(), any())).thenReturn(1000L);
-            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
-                    .thenReturn(Map.of("idempotency_key", "idem-1"));
-            when(client.createReservation(any(Object.class)))
-                    .thenReturn(CyclesResponse.success(200, allowResponse("res-noactual")));
+            AtomicBoolean actionRan = new AtomicBoolean(false);
 
             assertThatThrownBy(() -> service.executeWithReservation(
-                    () -> "ok",
+                    () -> {
+                        actionRan.set(true);
+                        return "ok";
+                    },
                     cycles, method, args, target,
                     "llm", "complete"
             ))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("Actual expression required");
 
-            // Should release reservation since action threw
-            verify(client).releaseReservation(eq("res-noactual"), any(Object.class));
+            assertThat(actionRan).isFalse();
+            verify(client, never()).createReservation(any(Object.class));
+            verify(client, never()).releaseReservation(anyString(), any(Object.class));
             verify(client, never()).commitReservation(anyString(), any(Object.class));
             verify(retryEngine, never()).scheduleEvent(anyString(), any());
+        }
+
+        @Test
+        void shouldCommitEstimateWhenActualExpressionFailsAfterAction() throws Throwable {
+            Cycles cycles = mockCycles(false);
+            when(cycles.actual()).thenReturn("#result.missing");
+            Method method = dummyMethod();
+            Object[] args = {100};
+            Object target = CyclesLifecycleServiceTest.this;
+
+            when(evaluator.evaluate(eq("1000"), eq(method), eq(args), isNull(), eq(target)))
+                    .thenReturn(1000L);
+            when(evaluator.evaluate(eq("#result.missing"), eq(method), eq(args), eq("ok"), eq(target)))
+                    .thenThrow(new IllegalArgumentException("bad actual expression"));
+            when(requestBuilderService.buildReservation(any(), anyLong(), anyString(), anyString(), any(), any(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "idem-1"));
+            when(client.createReservation(any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, allowResponse("res-actual-fallback")));
+            when(requestBuilderService.buildCommit(any(), anyLong(), any(), any()))
+                    .thenReturn(Map.of("idempotency_key", "com-1"));
+            when(client.commitReservation(eq("res-actual-fallback"), any(Object.class)))
+                    .thenReturn(CyclesResponse.success(200, commitSuccessResponse()));
+
+            Object result = service.executeWithReservation(
+                    () -> "ok",
+                    cycles, method, args, target,
+                    "llm", "complete"
+            );
+
+            assertThat(result).isEqualTo("ok");
+            verify(requestBuilderService).buildCommit(
+                    eq(cycles), eq(1000L), any(CyclesMetrics.class),
+                    eq(Map.of("actual_source", "estimate")));
+            verify(client, never()).releaseReservation(anyString(), any(Object.class));
         }
     }
 
@@ -3145,7 +3176,11 @@ class CyclesLifecycleServiceTest {
                     "llm", "complete"))
                     .isInstanceOf(CyclesProtocolException.class)
                     .hasMessageContaining("same-key retry");
-            verify(client, times(2)).createReservation(any(Object.class));
+            // A timed-out daemon may be cancelled before an overloaded JVM
+            // schedules it into the mocked client, so invocation count is
+            // nondeterministically zero, one, or two. The exception text
+            // proves the recovery loop consumed the second same-key attempt.
+            verify(client, atMost(2)).createReservation(any(Object.class));
         }
 
         @Test

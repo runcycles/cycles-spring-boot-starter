@@ -1,5 +1,17 @@
 # Cycles Protocol v0.1.25 — Client (Spring Boot Starter) Audit
 
+## 2026-08-06 — Never release known spend (v0.3.3)
+
+Recognized terminal commit rejection no longer releases a reservation after
+the guarded method completed. Release is scoped to an exception from the
+method itself; post-action settlement failures surface without returning
+known-spend budget. Missing required `actual` configuration now fails before
+reservation/action execution, while a failing explicit actual expression
+falls back to the estimate with `metadata.actual_source=estimate` so completed
+work is still settled. Regression tests cover all three boundaries. Final
+verification: 570 tests pass; coverage is 95.89% instructions, 95.92% lines,
+and 84.63% branches; the full Maven verify and artifact builds are clean.
+
 ## 2026-07-30 — machine-readable recovery evidence
 
 No runtime change. Durable recovery conformance now emits and uploads the
