@@ -1,5 +1,19 @@
 # Cycles Protocol v0.1.25 — Client (Spring Boot Starter) Audit
 
+## 2026-10-23 — Publishing and workflow dependency maintenance
+
+Consolidates Dependabot PRs #133, #132, and #134: Central publishing Maven plugin
+0.12.0, setup-java 6.1.0, and CodeQL SARIF uploader 4.39.0. Action pins were
+verified against upstream release tags. Plugin 0.12.0 fixes Maven 3.10
+staging metadata and adds opt-in skipUpload; existing publishing settings
+are preserved. Reference: https://central.sonatype.org/publish/publish-portal-maven/
+
+No runtime dependencies, public APIs, or YAML protocol contracts change.
+Existing Java 21 build, tests, coverage, and applicable recovery-conformance
+gates must pass on the consolidated commit before merge. Coverage thresholds
+remain unchanged. Publishing-profile validation does not upload artifacts.
+
+
 ## 2026-08-06 — Never release known spend (v0.3.3)
 
 Recognized terminal commit rejection no longer releases a reservation after
