@@ -1,5 +1,15 @@
 # Cycles Protocol v0.1.25 — Client (Spring Boot Starter) Audit
 
+## 2026-10-30 — Dependabot CodeQL uploader review
+
+PR #137 updates the SHA-pinned CodeQL SARIF uploader from 4.39.0 to 4.39.1.
+The new SHA, 9b3254085494b55a0f7c4c2b3d2d52cc712ce370, was verified
+against the upstream annotated v4.39.1 tag. Current main is incorporated
+before rerunning CI. Runtime dependencies and YAML protocol contracts are
+unchanged by this maintenance update. Java build/tests, coverage, and
+durable recovery conformance must pass before merge; coverage gates remain
+unchanged.
+
 ## 2026-10-23 — Publishing and workflow dependency maintenance
 
 Consolidates Dependabot PRs #133, #132, and #134: Central publishing Maven plugin
