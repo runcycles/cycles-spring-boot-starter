@@ -9,6 +9,8 @@
 
 Reserve budget around guarded method executions using a **reserve / execute / commit** lifecycle. If the budget is exceeded, execution is denied before the guarded code runs. Compatible with Java 21+ and Spring Boot 3.3+.
 
+Building this repository from source requires Maven 3.9.0+ and Java 21+.
+
 ## Quick Start
 
 ### 1. Add the dependency

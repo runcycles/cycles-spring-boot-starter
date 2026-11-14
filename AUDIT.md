@@ -1,5 +1,29 @@
 # Cycles Protocol v0.1.25 — Client (Spring Boot Starter) Audit
 
+## 2026-11-14 — Dependabot Java build tooling review
+
+Consolidates PRs #139, #141, and #142: SHA-pinned `actions/setup-java`
+6.2.0 and Flatten Maven Plugin 1.9.0 in the client and demo modules. The
+action SHA `77dd5b2ce225ea11469928ac317850245a74ae78` matches the upstream
+v6.2.0 tag. Flatten 1.9.0 requires Maven 3.9.0 or later; this source-build
+requirement is now documented in the README. Existing
+`resolveCiFriendliesOnly` settings and release publishing behavior are preserved.
+
+References:
+
+- https://github.com/actions/setup-java/releases/tag/v6.2.0
+- https://github.com/mojohaus/flatten-maven-plugin/releases/tag/1.9.0
+
+No runtime dependencies, public APIs, or YAML protocol contracts change.
+The existing 95% instruction-coverage gate is retained. The combined update
+must pass Java build/tests, coverage, demo compilation, and durable recovery
+conformance before merge; no release publication is triggered by this review.
+
+Local validation with Maven 3.9.4 and Java 21: all 570 client tests pass;
+instruction coverage is 95.94% and line coverage is 95.99%. Client clean
+install and demo clean verify both succeed. The generated flattened client
+POM resolves the artifact version to `0.3.3`.
+
 ## 2026-10-30 — Dependabot CodeQL uploader review
 
 PR #137 updates the SHA-pinned CodeQL SARIF uploader from 4.39.0 to 4.39.1.
