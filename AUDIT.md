@@ -1,5 +1,9 @@
 # Cycles Protocol v0.1.25 — Client (Spring Boot Starter) Audit
 
+## 2026-11-22 — Dependabot dependency review
+
+PR #143 updated `actions/setup-java` in CI and publishing. The `d1374f8` pin matches upstream v6.3.0, and both workflows continue to select Temurin JDK 21.
+
 ## 2026-11-14 — Dependabot Java build tooling review
 
 Consolidates PRs #139, #141, and #142: SHA-pinned `actions/setup-java`
